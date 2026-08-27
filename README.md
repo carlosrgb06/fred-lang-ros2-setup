@@ -1,2 +1,2 @@
 # fred-lang-ros2-setup
-Sistema de FrED 
+Repositorio para el sistema de FrED Lang.

@@ -1,7 +1,7 @@
 # FrED-LANG — Setup del stack ROS2 / xArm (gemelo digital)
 
 Repositorio para el sistema de FrED Lang: control del brazo UFACTORY xArm vía
-lenguaje natural (arquitectura Code as Policies). Este repo empaqueta todo el
+lenguaje natural. Este repo empaqueta todo el
 entorno de ROS2 + xArm en una imagen Docker — clonar y `docker build` es
 suficiente, no hace falta instalar ROS2 ni compilar nada a mano.
 
@@ -104,7 +104,7 @@ URDF / Xacro  →  MoveIt2  →  ros2_control  →  Gazebo Sim (simulación fís
 `ros2_control` es la capa de abstracción clave: expone la misma interfaz de
 "hardware" sin importar si abajo hay un simulador o el robot físico. El mismo
 código de MoveIt2 funciona igual en fake, en Gazebo, y eventualmente en el
-xArm real — solo cambia qué hay conectado del otro lado de `ros2_control`.
+xArm real solo cambia qué hay conectado del otro lado de `ros2_control`.
 
 RViz2 es **solo un visualizador** — dibuja lo que los tópicos le dicen, sin
 física de por medio. Gazebo sí corre un motor de física real (gravedad,
@@ -128,7 +128,7 @@ el driver real del robot.
 - [ ] Confirmar DOF real del xArm físico (6 vs 7) cuando haya acceso al hardware
 - [ ] Explorar espacio cartesiano con `tf2_echo` (joint-space vs Cartesian-space)
 - [ ] Probar `xarm7_moveit_gazebo.launch.py` en una compu con GPU dedicada
-- [ ] Capa de motion primitives + integración con el pipeline LLM (Code as Policies)
+- [ ] Capa de motion primitives + integración con el pipeline LLM 
 - [ ] Conectar el driver real del xArm cuando el hardware esté disponible
 
 ## Notas de lectura del SDK del xArm

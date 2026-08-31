@@ -2,16 +2,17 @@ services:
   fred-lang:
     build:
       context: .
-      args:
-        WITH_GAZEBO: "false"
     image: fred-lang-jazzy
     environment:
       - DISPLAY=${DISPLAY}
+    devices:
+      - /dev/dri:/dev/dri
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
     network_mode: host
     stdin_open: true
     tty: true
+    # Descomenta este bloque en una compu con GPU NVIDIA dedicada:
     # deploy:
     #   resources:
     #     reservations:

@@ -6,12 +6,21 @@ ENV ROS_DISTRO=jazzy
 RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-rosdep \
+    python3-pip \
     git \
     ros-${ROS_DISTRO}-moveit \
     ros-${ROS_DISTRO}-ros-gz-sim \
     ros-${ROS_DISTRO}-ros-gz-bridge \
     ros-${ROS_DISTRO}-gz-ros2-control \
     && rm -rf /var/lib/apt/lists/*
+
+# xarm-python-sdk: SDK oficial de Python para comparar contra xarm_api/ROS2
+# durante el debugging de motion_enable (Track B del TASKS.md). Se instala
+# aquí, horneado en la imagen, para que sobreviva a los contenedores --rm —
+# instalarlo "al vuelo" dentro de un contenedor se pierde al salir de él.
+# --break-system-packages es necesario porque Ubuntu 24.04 (base de esta
+# imagen) marca el Python del sistema como "externally managed" (PEP 668).
+RUN pip3 install --break-system-packages xarm-python-sdk==1.18.4
 
 RUN mkdir -p /root/xarm_ws/src
 WORKDIR /root/xarm_ws

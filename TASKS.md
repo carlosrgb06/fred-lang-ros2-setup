@@ -15,7 +15,7 @@ Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[
 - [x] `/dev/dri` pasado al contenedor para render de RViz2
 - [ ] Habilitar a un colaborador a replicar el entorno completo
   - [!] Bloqueado: issue de `docker buildx` en su máquina — pendiente de resolver
-- [ ] Agregar el contenedor de UFACTORY Studio (`uf-ubuntu-docker`) al repo `fred-lang-ros2-setup`
+- [X] Agregar el contenedor de UFACTORY Studio (`uf-ubuntu-docker`) al repo `fred-lang-ros2-setup`
   - Puede quedar como contenedor separado (no necesita fusionarse con el de ROS2 Jazzy)
   - Documentar en el README el comando de arranque correcto: `docker run -it --name uf_software --network host danielwang123321/uf-ubuntu-docker /bin/bash` + `/xarm_scripts/xarm_start.sh 7 7`
   - Idealmente un script (`run_uf_studio.sh`) que automatice esto para no repetir el comando a mano cada vez

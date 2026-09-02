@@ -37,22 +37,22 @@ Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[
   - Descartado: conexiones TCP concurrentes (solo 1 cliente activo)
   - Descartado: `baud_checkset:=false`
   - Descartado: `report_type:=rich`
-  - Sospecha actual: mismatch de versión del SDK C++ empaquetado en `xarm_api` (`1.18.1`) vs protocolo del firmware (`v2.4.0`)
+  - Descartado: versión del SDK C++ desactualizada — `v1.18.1` ya es la última tag publicada y coincide con el tip de `master`, no hay versión más nueva a la que subir
+  - **Decisión (2026-09-02): se abandona Track A.** El SDK de Python (`xarm-python-sdk==1.18.4`) funciona perfecto contra el mismo firmware en el mismo momento (`motion_enable`/`set_mode`/`set_state`/`set_position` todos con `ret=0`, brazo se mueve en Studio) — el bug está aislado 100% a la capa `xarm_api`/ROS2, no al firmware ni al SDK. No vale la pena seguir persiguiéndolo con el deadline encima.
 
-### Track A — Fix de raíz: actualizar SDK C++ de `xarm_api`
-- [ ] Crear branch `test/sdk-upgrade`
-- [ ] Actualizar submódulo del SDK C++ a `v1.18.4` (o el tag estable más reciente)
-- [ ] `colcon build --packages-select xarm_api xarm_sdk`
-- [ ] Reintentar `motion_enable` vía ROS2
-- [ ] Si funciona: merge a rama principal
-- [ ] Si rompe algo: documentar el conflicto y descartar por ahora
+### Track A — Fix de raíz: actualizar SDK C++ de `xarm_api` — **DESCARTADO**
+- [x] Crear branch `test/sdk-upgrade`
+- [x] Confirmar que no hay versión más nueva del SDK C++ a la que subir (`v1.18.1` = tip de `master`)
+- [x] Aislar el bug: SDK de Python funciona, `xarm_api`/ROS2 no — mismo firmware, mismo instante
+- Se documenta y se descarta. No se sigue esta ruta.
 
-### Track B — Rodeo pragmático: nodo propio con SDK de Python
+### Track B — Camino elegido: nodo propio con SDK de Python
 - [ ] Crear paquete ROS2 nuevo `fred_lang_driver`
 - [ ] Nodo `rclpy` que envuelva `XArmAPI` (Python) internamente
 - [ ] Exponer servicios equivalentes: `motion_enable`, `set_mode`, `set_state`, `set_position`, `set_servo_angle`
 - [ ] Definir si reemplazan los nombres `/xarm/...` o usan namespace propio mientras se prueba
 - [ ] Probar el flujo completo de habilitar + mover desde este nodo
+- [ ] Hornear `xarm-python-sdk==1.18.4` en el Dockerfile (falta mergear a la rama principal)
 
 ---
 

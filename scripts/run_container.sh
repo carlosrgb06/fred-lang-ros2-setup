@@ -5,6 +5,12 @@
 
 set -e
 
+# Calcula la ruta del repo a partir de dónde vive ESTE script, no de dónde
+# estabas parado al llamarlo — así "cd scripts && ./run_container.sh" y
+# "./scripts/run_container.sh" desde la raíz dan exactamente el mismo mount.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
 IMAGE_NAME="fred-lang-jazzy"
 
 # Permite que contenedores locales de Docker se conecten al X server del host.

@@ -17,4 +17,5 @@ docker run -it --rm \
   --device /dev/dri \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v "$(pwd)/src:/root/xarm_ws/src" \
   "$IMAGE_NAME"

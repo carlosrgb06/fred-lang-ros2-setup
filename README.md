@@ -140,3 +140,37 @@ Orden recomendado dentro del SDK oficial:
 4. Ejemplos numerados en `example/wrapper/common/`
 
 (Los `< >` en la documentación de comandos son solo notación, no caracteres literales.)
+
+## Correr contenedor uf_studio 
+ Levanta el contenedor de UFACTORY Studio: el simulador de firmware que
+ expone los servicios NATIVOS de xarm_api (/xarm/...). El launch de fake
+ hardware / RViz2 NO expone estos servicios — solo
+ xarm7_traj_controller/follow_joint_trajectory — por eso este contenedor es
+ necesario aparte para probar la API nativa (set_position, set_servo_angle,
+ gripper, etc.).
+
+ Corre en un contenedor SEPARADO del contenedor de ROS2 Jazzy (fred-lang-jazzy).
+ No se fusiona con el Dockerfile de este repo porque es una imagen ya
+ construida por terceros, no parte del stack que compilamos nosotros.
+
+ --network host es OBLIGATORIO (igual que en run_container.sh): sin esto,
+ el contenedor de ROS2 Jazzy no puede alcanzar los puertos del protocolo
+ xArm (30000-30003) ni la UI web en el puerto 18333.
+
+```bash
+./scripts/run_uf_studio.sh
+```
+Este comando levanta el contenedor, borrando la basura que pudo haber quedado de una ejecucion previa. Despues corre:
+
+```bash
+./xarm_scripts/xarm_start.sh 7 7; exec /bin/bash
+```
+ xarm_start.sh levanta DOS sesiones de `screen` en segundo plano:
+   1. el binario del firmware simulado
+   2. el daemon web (xarmdaemon), que sirve UFACTORY Studio en el puerto 18333
+
+ Una vez dentro del contenedor (te quedas en un bash normal tras el arranque):
+   screen -ls              # confirmar que ambas sesiones están corriendo
+   screen -r <nombre>      # ver logs de una sesión (Ctrl+A, D para salir sin matarla)
+
+ UFACTORY Studio queda accesible en el HOST en: http://localhost:18333

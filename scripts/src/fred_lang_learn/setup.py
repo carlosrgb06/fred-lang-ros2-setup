@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-	   'sumador_node = fred_lang_learn.sumador_node:main()'
+	   'sumador_node = fred_lang_learn.sumador_node:main'
         ],
     },
 )

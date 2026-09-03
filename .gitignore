@@ -1,0 +1,15 @@
+# Configuración local del editor — no le sirve a nadie más que clone el repo
+.vscode/
+
+# Artefactos de build de ROS2/colcon — se regeneran con "colcon build",
+# no tiene sentido versionarlos (y build/ en particular puede pesar mucho)
+build/
+install/
+log/
+
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Cache de pip si alguna vez se instala algo localmente en vez de en la imagen
+*.egg-info/

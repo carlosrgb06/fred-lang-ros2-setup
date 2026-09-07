@@ -1,6 +1,6 @@
 # FrED-LANG — Goals & Tasks
 
-> Última actualización: 2026-09-03
+> Última actualización: 2026-09-07
 > Deadline del entregable: ~3 semanas desde finales de agosto 2026
 
 Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[!]` bloqueado
@@ -32,7 +32,7 @@ Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[
 - [x] Servicios nativos `/xarm/...` confirmados con `ros2 service list`
 - [x] Verificado con SDK de Python directo: `motion_enable` + `set_mode` + `set_state` + `set_position` → el brazo se mueve
 - [x] **RESUELTO — el `ret=3` de `motion_enable` es cosmético.** Análisis abajo.
-- [!] UFACTORY Studio (`localhost:18333`) no carga la web ahora mismo; el firmware y los puertos 30001-30003 sí responden. No bloqueante (Studio es solo visualización). Pendiente: revisar `xarmdaemon` dentro de `uf_software`.
+- [X] UFACTORY Studio (`localhost:18333`) no carga la web ahora mismo; el firmware y los puertos 30001-30003 sí responden. No bloqueante (Studio es solo visualización). Pendiente: revisar `xarmdaemon` dentro de `uf_software`.
 
 ### Diagnóstico del `ret=3` de `motion_enable` (2026-09-03)
 
@@ -61,15 +61,23 @@ del simulador **nunca envía esa trama** (probado esperando hasta 20 s con `set_
 ### Track elegido — cliente de servicios `/xarm/...` con enable tolerante a `ret=3`
 
 Se **mantiene el driver oficial C++ `xarm_api`** (sirve para todo salvo el ACK cosmético).
-`fred_lang_driver` NO envuelve `XArmAPI` de Python: es un cliente delgado de los servicios `/xarm/...`.
-
-- [ ] `fred_lang_driver/arm.py`: clase helper `FredArm` sobre `/xarm/motion_enable`, `/xarm/set_mode`,
+- [~] `fred_lang_driver/fred_arm.py`: clase helper `FredArm` sobre `/xarm/motion_enable`, `/xarm/set_mode`,
       `/xarm/set_state`, `/xarm/set_position`, `/xarm/set_servo_angle`
+  - [x] Paquete `fred_lang_driver` recreado limpio con `ros2 pkg create --build-type ament_python`
+        (el paquete anterior no generaba `local_setup.bash` / plumbing rota)
+  - [x] `motion_enable(enable, id=8)` — cliente de `/xarm/motion_enable`, patrón
+        `call_async` + `spin_until_future_complete`; entry point registrado, `ros2 run` OK
+  - [x] Verificado en vivo desde `FredArm`: `motion_enable(1)` → `ret=3` (cosmético) pero
+        `/xarm/robot_states` reporta `mt_able=255`, `err=0` → los 7 servos habilitados
+  - [ ] `set_mode(mode)` y `set_state(state)` (mismo molde, tipo `SetInt16` sin `id`)
+  - [ ] `set_position` / `set_servo_angle`
 - [ ] `enable()`: llama `motion_enable`; si devuelve `ret=3` (RES_TIMEOUT) NO aborta — verifica contra
       el tópico `/xarm/robot_states` (`mt_able` = máscara de servos activos, `err == 0`)
+  - [ ] Requiere primero la suscripción a `/xarm/robot_states` + callback `_robot_states_cb` + `_servos_enabled()` (bitmask sobre `mt_able`)
 - [ ] `move_to()` / `move_joints()`: envuelven `set_position` / `set_servo_angle`, esperan `state == 2`
 - [ ] Smoke test: habilitar + mover desde este helper
-- [ ] Limpiar `package.xml`: quitar `xarm-python-sdk` (ya no se usa; además el tag estaba mal cerrado)
+- [x] Limpiar `package.xml`: `xarm-python-sdk` eliminado y tag mal cerrado corregido
+      (resuelto al recrear el paquete con `ros2 pkg create`)
 
 ### Track B (fallback, NO necesario ahora) — nodo propio envolviendo `XArmAPI` de Python
 
@@ -104,3 +112,5 @@ Solo si aparece un servicio que el driver C++ no pueda cumplir. Requeriría horn
 - `motion_enable` vía `/xarm/...` devuelve `ret=3` en el simulador — es cosmético (SDK C++ ↔ firmware v2.4.0),
   los servos se habilitan y el brazo se mueve. `FredArm.enable()` lo trata como "verificar `/xarm/robot_states`", no como error.
 - `uf_software` DEBE recrearse (`docker run --network host`), no solo `docker start`, o queda en red bridge y el driver no levanta.
+- Al agregar un paquete nuevo al workspace, el **primer** `colcon build` debe ser completo (sin `--packages-select`); los builds parciales dejan el `setup.bash` raíz desincronizado y el paquete "invisible". `ros2 pkg executables <pkg>` es la verdad de fondo para saber si ROS2 lo ve (no buscar archivos a mano).
+- Un `package.xml` con XML malformado (p. ej. tag `</exec_depend>` mal cerrado) hace que `colcon build` termine "exitoso" pero instale el paquete a medias. Ante plumbing dudosa, recrear con `ros2 pkg create` es más rápido que depurarla.

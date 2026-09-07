@@ -1,6 +1,6 @@
 # FrED-LANG — Goals & Tasks
 
-> Última actualización: 2026-09-02
+> Última actualización: 2026-09-03
 > Deadline del entregable: ~3 semanas desde finales de agosto 2026
 
 Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[!]` bloqueado
@@ -30,35 +30,61 @@ Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[
 - [x] UFACTORY Studio accesible en `localhost:18333`, robot conectado y visible
 - [x] Driver `xarm_api` lanzado (`xarm7_driver.launch.py robot_ip:=127.0.0.1`)
 - [x] Servicios nativos `/xarm/...` confirmados con `ros2 service list`
-- [x] Verificado con SDK de Python directo: `motion_enable` + `set_mode` + `set_state` + `set_position` → el brazo se mueve en Studio 🎉
-- [!] **Bloqueado vía ROS2:** `motion_enable` regresa `ret=3` (timeout) al llamarlo desde `xarm_api`/ROS2, aunque el firmware está sano (confirmado por SDK Python)
-  - Descartado: `id=8` vs joints individuales
-  - Descartado: auto-colisión / estado corrupto del brazo
-  - Descartado: conexiones TCP concurrentes (solo 1 cliente activo)
-  - Descartado: `baud_checkset:=false`
-  - Descartado: `report_type:=rich`
-  - Descartado: versión del SDK C++ desactualizada — `v1.18.1` ya es la última tag publicada y coincide con el tip de `master`, no hay versión más nueva a la que subir
-  - **Decisión (2026-09-02): se abandona Track A.** El SDK de Python (`xarm-python-sdk==1.18.4`) funciona perfecto contra el mismo firmware en el mismo momento (`motion_enable`/`set_mode`/`set_state`/`set_position` todos con `ret=0`, brazo se mueve en Studio) — el bug está aislado 100% a la capa `xarm_api`/ROS2, no al firmware ni al SDK. No vale la pena seguir persiguiéndolo con el deadline encima.
+- [x] Verificado con SDK de Python directo: `motion_enable` + `set_mode` + `set_state` + `set_position` → el brazo se mueve
+- [x] **RESUELTO — el `ret=3` de `motion_enable` es cosmético.** Análisis abajo.
+- [!] UFACTORY Studio (`localhost:18333`) no carga la web ahora mismo; el firmware y los puertos 30001-30003 sí responden. No bloqueante (Studio es solo visualización). Pendiente: revisar `xarmdaemon` dentro de `uf_software`.
 
-### Track A — Fix de raíz: actualizar SDK C++ de `xarm_api` — **DESCARTADO**
-- [x] Crear branch `test/sdk-upgrade`
-- [x] Confirmar que no hay versión más nueva del SDK C++ a la que subir (`v1.18.1` = tip de `master`)
-- [x] Aislar el bug: SDK de Python funciona, `xarm_api`/ROS2 no — mismo firmware, mismo instante
-- Se documenta y se descarta. No se sigue esta ruta.
+### Diagnóstico del `ret=3` de `motion_enable` (2026-09-03)
 
-### Track B — Camino elegido: nodo propio con SDK de Python
-- [ ] Crear paquete ROS2 nuevo `fred_lang_driver`
-- [ ] Nodo `rclpy` que envuelva `XArmAPI` (Python) internamente
-- [ ] Exponer servicios equivalentes: `motion_enable`, `set_mode`, `set_state`, `set_position`, `set_servo_angle`
-- [ ] Definir si reemplazan los nombres `/xarm/...` o usan namespace propio mientras se prueba
-- [ ] Probar el flujo completo de habilitar + mover desde este nodo
-- [ ] Hornear `xarm-python-sdk==1.18.4` en el Dockerfile (falta mergear a la rama principal)
+**Causa raíz:** el SDK **C++ v1.18.1** (el que compila `xarm_api`) espera de forma bloqueante una
+trama de respuesta al opcode `MOTION_EN` (11) con el transaction-id correcto. El firmware **v2.4.0**
+del simulador **nunca envía esa trama** (probado esperando hasta 20 s con `set_timeout(20)`: sigue
+`ret=3`). El resto de opcodes (`SET_MODE`, `SET_STATE`, `MOVE_LINE`) responden normal. El SDK
+**Python 1.18.4** no depende de ese ACK → por eso ahí da `ret=0`.
+
+**Es cosmético, no funcional.** Probado con un binario C++ mínimo sin ROS2 ni el hilo de
+`/joint_states` (`xarm_sdk/cxx/example/9999-fredlang_enable_probe.cc`):
+- `motion_enable` → `ret=3`, pero `motor_enable_states = [1,1,1,1,1,1,1]` → los 7 servos SÍ se habilitan
+- `set_mode(0)` / `set_state(0)` → `ret=0`
+- `set_position` → `ret=0`; ángulos de joints y TCP cambian → el brazo se mueve de verdad
+
+**Correcciones a decisiones previas:**
+- La nota del 2026-09-02 ("bug aislado 100% a la capa `xarm_api`/ROS2") era **incorrecta**: el bug
+  está en el SDK C++ contra este firmware; ROS2 solo lo propaga. Descartados con esto los
+  callejones: `id=8`, auto-colisión, conexiones concurrentes, `baud_checkset`, `report_type`,
+  versión del SDK C++, y la hipótesis de "readiness" (3 llamadas en 90 s, siempre `ret=3`).
+- Bug aparte, real y ya resuelto: `uf_software` se levantaba en red `bridge` (`172.17.0.2`) en vez de
+  `--network host` (`docker start` reusa la config de red original del contenedor). Recreado con
+  `docker rm -f uf_software` + `docker run --network host`, `robot_ip:=127.0.0.1` ya funciona. En
+  bridge, el driver colgaba en `connect()` sin llegar a anunciar los servicios.
+
+### Track elegido — cliente de servicios `/xarm/...` con enable tolerante a `ret=3`
+
+Se **mantiene el driver oficial C++ `xarm_api`** (sirve para todo salvo el ACK cosmético).
+`fred_lang_driver` NO envuelve `XArmAPI` de Python: es un cliente delgado de los servicios `/xarm/...`.
+
+- [ ] `fred_lang_driver/arm.py`: clase helper `FredArm` sobre `/xarm/motion_enable`, `/xarm/set_mode`,
+      `/xarm/set_state`, `/xarm/set_position`, `/xarm/set_servo_angle`
+- [ ] `enable()`: llama `motion_enable`; si devuelve `ret=3` (RES_TIMEOUT) NO aborta — verifica contra
+      el tópico `/xarm/robot_states` (`mt_able` = máscara de servos activos, `err == 0`)
+- [ ] `move_to()` / `move_joints()`: envuelven `set_position` / `set_servo_angle`, esperan `state == 2`
+- [ ] Smoke test: habilitar + mover desde este helper
+- [ ] Limpiar `package.xml`: quitar `xarm-python-sdk` (ya no se usa; además el tag estaba mal cerrado)
+
+### Track B (fallback, NO necesario ahora) — nodo propio envolviendo `XArmAPI` de Python
+
+Solo si aparece un servicio que el driver C++ no pueda cumplir. Requeriría hornear
+`xarm-python-sdk==1.18.4` en el Dockerfile.
+
+### (opcional) Entender el ACK faltante a fondo
+- [ ] `tcpdump` puerto 502: `motion_enable` de Python (`ret=0`) vs C++ (`ret=3`) — qué trama recibe
+      uno y el otro no. No crítico para el deadline.
 
 ---
 
 ## Goal 3 — Integración de FrED-LANG con la API validada
 
-- [ ] Conectar las funciones de alto nivel (`agarrar()`, `muevete_a()`, etc.) con los servicios nativos verificados (de Track A o B)
+- [ ] Conectar las funciones de alto nivel (`agarrar()`, `muevete_a()`, etc.) con `FredArm` (cliente de los servicios `/xarm/...`)
 - [ ] Validar la capa de seguridad ROS2 (bloqueo de trayectorias imposibles) contra el driver elegido
 - [ ] Prueba end-to-end: comando en lenguaje natural → código Python generado → ejecución validada en el simulador
 
@@ -75,4 +101,6 @@ Convención de estado: `[ ]` pendiente · `[x]` hecho · `[~]` en progreso · `[
 ## Notas rápidas / decisiones tomadas
 - Prioridad de diseño: interpretabilidad (scripts Python legibles) y seguridad (validación ROS2 antes de mover el brazo real)
 - MoveIt2 deliberadamente pospuesto para no añadir complejidad innecesaria en esta etapa
-- Tracks A y B corren en paralelo — B es el camino rápido para desbloquear el deadline, A es el fix correcto a mediano plazo
+- `motion_enable` vía `/xarm/...` devuelve `ret=3` en el simulador — es cosmético (SDK C++ ↔ firmware v2.4.0),
+  los servos se habilitan y el brazo se mueve. `FredArm.enable()` lo trata como "verificar `/xarm/robot_states`", no como error.
+- `uf_software` DEBE recrearse (`docker run --network host`), no solo `docker start`, o queda en red bridge y el driver no levanta.

@@ -18,8 +18,8 @@ set -e
 
 IMAGE_NAME="danielwang123321/uf-ubuntu-docker"
 CONTAINER_NAME="uf_software"
-DOF=7   # grados de libertad del xArm (usamos xArm7)
-AXIS=7  # segundo argumento de xarm_start.sh — mismo valor que DOF
+DOF=6   # grados de libertad del xArm (usamos xArm6)
+AXIS=6  # segundo argumento de xarm_start.sh — mismo valor que DOF
 
 # Si el contenedor ya existe (de una corrida anterior), lo reutilizamos en
 # vez de fallar con "name already in use".

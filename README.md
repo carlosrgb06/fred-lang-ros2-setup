@@ -1,6 +1,6 @@
-# FrED-LANG — Stack ROS2 / xArm7
+# FrED-LANG — Stack ROS2 / xArm6
 
-Control del brazo robótico UFACTORY xArm7 mediante lenguaje natural, siguiendo una
+Control del brazo robótico UFACTORY xArm6 mediante lenguaje natural, siguiendo una
 arquitectura *Code as Policies*: un modelo de lenguaje traduce comandos en español o
 inglés a código Python, que se ejecuta a través de **primitivas de movimiento
 validadas por nodos de seguridad en ROS2** antes de mover el brazo.
@@ -12,7 +12,7 @@ que se construyen las primitivas de alto nivel.
 ## Pipeline del sistema
 
 ```
-   Persona            LLM              Python           ROS2            xArm7
+   Persona            LLM              Python           ROS2            xArm6
   "agarra la    →   traduce a     →   primitivas   →  validación  →   ejecución
   pieza roja"      código Python     de movimiento    de seguridad    en el robot
 ```
@@ -36,7 +36,7 @@ El sistema corre en **dos contenedores Docker**, ambos con `--network host`:
 ```
 ┌─────────────────────────────┐        servicios ROS2        ┌──────────────────────────────┐
 │  uf_software                │  ◄─────────────────────────  │  fred-lang-jazzy             │
-│  (firmware simulado xArm7)  │                              │  (ROS2 Jazzy)                │
+│  (firmware simulado xArm6)  │                              │  (ROS2 Jazzy)                │
 │                             │        TCP 502 / 30000-3     │                              │
 │  danielwang123321/          │  ◄─────────────────────────  │  ├─ driver xarm_api (C++)    │
 │  uf-ubuntu-docker           │                              │  │   expone /xarm/*          │
@@ -49,12 +49,29 @@ El sistema corre en **dos contenedores Docker**, ambos con `--network host`:
 nativos `/xarm/*`. No se comunica con el hardware directamente ni envuelve el SDK de
 Python: habla únicamente con el driver oficial C++ (`xarm_api`) a través de servicios
 ROS2. La ventaja clave es la **portabilidad 1:1**: el mismo código funciona contra el
-simulador (`robot_ip:=127.0.0.1`) y contra el xArm7 físico cambiando solo la IP.
+simulador (`robot_ip:=127.0.0.1`) y contra el xArm6 físico cambiando solo la IP.
+
+**Métodos actuales de `FredArm`:**
+
+| Método | Servicio | Función |
+|---|---|---|
+| `motion_enable(enable, id=8)` | `/xarm/motion_enable` | Habilita/deshabilita los servos |
+| `set_mode(mode)` | `/xarm/set_mode` | Fija el modo de operación (0 = posición) |
+| `set_state(state)` | `/xarm/set_state` | Fija el estado (0 = READY) |
+| `set_position(pose, ...)` | `/xarm/set_position` | Movimiento cartesiano (el firmware resuelve IK) |
+| `set_servo_angle(angles, ...)` | `/xarm/set_servo_angle` | Movimiento articular (ángulos directos) |
 
 **Decisión de arquitectura — API nativa sobre MoveIt2.** El control se hace vía los
 servicios `/xarm/*` del driver, no vía MoveIt2. MoveIt2 y Gazebo quedan diferidos como
 infraestructura futura (ver [Roadmap](#roadmap)) para evitar complejidad innecesaria en
 esta etapa y porque el equipo de desarrollo trabaja sobre GPU integrada.
+
+**Espacio articular vs. cartesiano.** La librería expone las dos formas de mover el brazo:
+`set_servo_angle` (le das los 6 ángulos de junta, en radianes) y `set_position` (le das la
+pose del efector final y el firmware resuelve la cinemática inversa). El flujo principal es
+**cartesiano** (`set_position`), porque se alinea con cómo una cámara percibe el mundo —
+coordenadas, no ángulos — de cara al futuro modelo VLA. El articular se reserva para poses
+fijas conocidas como el *home*, donde guardar los ángulos evita recalcular IK.
 
 ---
 
@@ -104,10 +121,10 @@ El flujo de desarrollo requiere **tres contextos** corriendo en paralelo.
 ```bash
 ./scripts/run_uf_studio.sh
 # ya dentro del contenedor:
-./xarm_scripts/xarm_start.sh 7 7; exec /bin/bash
+./xarm_scripts/xarm_start.sh 6 6; exec /bin/bash
 ```
 
-El argumento `7 7` corresponde al xArm7 (la tabla de modelos de `xarm_start.sh` es
+El argumento `6 6` corresponde al xArm6 (la tabla de modelos de `xarm_start.sh` es
 `<axis> <type>`: `5 5`=xArm5, `6 6`=xArm6, `7 7`=xArm7, `6 9`=Lite6, `6 12`=850).
 
 > **Importante:** `uf_software` debe recrearse con `--network host` (el script ya lo
@@ -119,7 +136,7 @@ El argumento `7 7` corresponde al xArm7 (la tabla de modelos de `xarm_start.sh` 
 ```bash
 ./scripts/run_container.sh
 # ya dentro:
-ros2 launch xarm_api xarm7_driver.launch.py robot_ip:=127.0.0.1
+ros2 launch xarm_api xarm6_driver.launch.py robot_ip:=127.0.0.1
 ```
 
 Espera el log `[TCP STATUS] CONTROL: 1, REPORT: 1` y confirma los servicios:
@@ -127,6 +144,10 @@ Espera el log `[TCP STATUS] CONTROL: 1, REPORT: 1` y confirma los servicios:
 ```bash
 ros2 service list | grep /xarm
 ```
+
+> El firmware y el driver deben coincidir en modelo: firmware `6 6` ↔ `xarm6_driver`. Se
+> puede verificar con `ros2 topic echo /xarm/robot_states --once`: el array `angle` debe
+> tener **6** elementos.
 
 ### 3 · Nodo `FredArm` — otra shell en `fred-lang-jazzy`
 
@@ -137,8 +158,8 @@ source /root/xarm_ws/install/setup.bash
 ros2 run fred_lang_driver fred_arm
 ```
 
-Salida esperada: `motion_enable(enable=1, id=8) -> ret=3` seguido de la habilitación de
-los servos (ver [nota sobre `ret=3`](#nota-de-ingeniería--el-ret3-de-motion_enable)).
+El `main()` de ejemplo ejecuta la secuencia de arranque
+(`motion_enable → set_mode → set_state`) y un movimiento de prueba.
 
 ---
 
@@ -147,17 +168,19 @@ los servos (ver [nota sobre `ret=3`](#nota-de-ingeniería--el-ret3-de-motion_ena
 | Componente | Estado |
 |---|---|
 | Entorno Docker reproducible (ROS2 Jazzy + `xarm_ros2`) | ✅ Completo |
-| Firmware simulado xArm7 end-to-end | ✅ Funcional |
+| Firmware simulado xArm6 end-to-end | ✅ Funcional |
 | Driver `xarm_api` conectado al simulador | ✅ Funcional |
 | Paquete `fred_lang_driver` (ament_python) | ✅ Creado y compilado |
-| `FredArm.motion_enable()` | ✅ Validado contra el simulador |
-| `FredArm` — `set_mode`, `set_state`, `set_position`, `set_servo_angle` | 🚧 En construcción |
-| Suscripción a `/xarm/robot_states` (verificación de estado) | 🚧 En construcción |
-| Primitivas de movimiento + integración con LLM | ⏳ Planeado |
+| Secuencia de arranque (`motion_enable`, `set_mode`, `set_state`) | ✅ Validada |
+| Movimiento cartesiano (`set_position`) | ✅ Validado — el brazo se mueve |
+| Movimiento articular (`set_servo_angle`) | ✅ Validado — el brazo se mueve |
+| Suscripción a `/xarm/robot_states` (lectura de estado) | 🚧 Siguiente |
+| `enable()` tolerante a `ret=3` (verifica estado) | 🚧 Siguiente |
+| Primitivas de alto nivel + integración con LLM | ⏳ Planeado |
 
-La clase `FredArm` tiene su **molde de método validado** end-to-end (patrón cliente:
-armar request → `call_async` → `spin_until_future_complete` → leer `ret`). Los métodos
-restantes siguen ese mismo molde.
+Ambos métodos de movimiento están verificados objetivamente contra el simulador: tras un
+`set_position` la pose del TCP cambia según lo comandado, y tras un `set_servo_angle` los
+ángulos de junta cambian, ambos con `ret=0` y `err=0`.
 
 ---
 
@@ -174,9 +197,9 @@ diagnosticada:
 - El SDK **Python 1.18.4** no depende de ese ACK, por eso ahí devuelve `ret=0`.
 
 **Verificación de que los servos sí se habilitan:** tras `motion_enable`, el tópico
-`/xarm/robot_states` reporta `mt_able = 255` (máscara de servos activos, todos los bits
-en 1) y `err = 0`. Por eso `FredArm.enable()` no debe abortar ante `ret=3`, sino
-confirmar el estado contra `/xarm/robot_states`.
+`/xarm/robot_states` reporta `mt_able = 255` (máscara de servos activos) y `err = 0`. Por
+eso `FredArm.enable()` (pendiente) no debe abortar ante `ret=3`, sino confirmar el estado
+contra `/xarm/robot_states`.
 
 ---
 
@@ -185,11 +208,23 @@ confirmar el estado contra `/xarm/robot_states`.
 ```bash
 ros2 topic list
 ros2 node list
-ros2 topic echo /xarm/robot_states --once     # estado del robot (state, mt_able, err, pose)
+ros2 topic echo /xarm/robot_states --once     # estado del robot (state, mode, mt_able, err, angle, pose)
 ros2 topic echo /joint_states                 # ángulos articulares (NO cartesiano)
 ros2 run tf2_ros tf2_echo link_base link_eef  # pose cartesiana del efector final
-ros2 interface show xarm_msgs/msg/RobotMsg     # explorar la definición del mensaje
+ros2 interface show xarm_msgs/srv/MoveCartesian  # definición del servicio de movimiento cartesiano
+ros2 interface show xarm_msgs/srv/MoveJoint      # definición del servicio de movimiento articular
 ```
+
+**Tabla de referencia — campos de `robot_states`:**
+
+- `state` (leído): 1 = en movimiento, 2 = READY, 3 = pausado, 4 = deteniéndose.
+  (Nota: los estados que se *fijan* con `set_state` usan otra tabla; `set_state(0)` se
+  reporta como `state: 2`.)
+- `mode`: 0 = posición, 1 = servoj, 4/5 = velocidad, 6/7 = replanning online.
+- `mt_able`: máscara de bits de servos habilitados.
+- `err` / `warn`: 0 = sin error. `set_state(0)` limpia el error.
+- `angle`: ángulos de junta (6 para xArm6). `pose`: `[x, y, z, roll, pitch, yaw]`
+  (XYZ en mm, orientación en rad).
 
 ---
 
@@ -199,7 +234,7 @@ ros2 interface show xarm_msgs/msg/RobotMsg     # explorar la definición del men
 probar la API nativa. Para eso, usar el flujo de tres contextos descrito arriba.
 
 ```bash
-ros2 launch xarm_moveit_config xarm7_moveit_fake.launch.py
+ros2 launch xarm_moveit_config xarm6_moveit_fake.launch.py
 ```
 
 ---
@@ -209,7 +244,9 @@ ros2 launch xarm_moveit_config xarm7_moveit_fake.launch.py
 | Problema | Causa | Solución |
 |---|---|---|
 | Paquete Python nuevo no aparece en `ros2 run` / `ros2 pkg executables` tras `colcon build` | El primer build con `--packages-select` deja el `setup.bash` raíz desincronizado; o un `package.xml` con XML malformado instala el paquete a medias | Primer build de un paquete nuevo **siempre completo** (`colcon build` sin flags) + re-`source`. Si persiste, validar `package.xml` o recrear con `ros2 pkg create`. `ros2 pkg executables <pkg>` es la verdad de fondo para saber si ROS2 lo ve |
+| Cambios en el código no surten efecto al correr el nodo | Falta `colcon build` tras editar, o falta re-`source` tras el build | El ciclo es siempre **build → source → run**, en la misma terminal |
 | El driver cuelga en `connect()` y no anuncia servicios | `uf_software` quedó en red `bridge` (`docker start` reusa la config previa) | Recrear con `docker run --network host` (lo hace `run_uf_studio.sh`) |
+| Movimiento cartesiano falla con error C40 | Con `motion_type=0` (lineal), la pose objetivo no es alcanzable en línea recta o no tiene IK válida | Usar poses alcanzables cercanas, o considerar `motion_type` 1/2 (requiere firmware >= 1.11.100) |
 | `docker: unknown command: docker compose` | El plugin de compose no está instalado | No es necesario — usar `docker build` / `docker run` directo |
 | `E: Unable to locate package ...` durante `rosdep install` en el Dockerfile | Cada `RUN` es una capa aislada; un `apt-get update` previo no persiste | Poner `apt-get update` en el mismo `RUN` que el install que lo necesita |
 | `Failed to find ... xarm_gazebo/package.sh` al compilar `xarm_moveit_config` | Se omitió `xarm_gazebo` con `--packages-skip`, pero `xarm_moveit_config` depende de él | Compilar `xarm_gazebo` siempre (no requiere GPU para compilar) |
@@ -220,9 +257,9 @@ ros2 launch xarm_moveit_config xarm7_moveit_fake.launch.py
 
 ## Roadmap
 
-- [ ] Completar los métodos de `FredArm` (`set_mode`, `set_state`, `set_position`, `set_servo_angle`)
+- [x] Métodos base de `FredArm`: arranque (`motion_enable`, `set_mode`, `set_state`) y movimiento (`set_position`, `set_servo_angle`)
 - [ ] Suscripción a `/xarm/robot_states` + verificación de estado (`enable()` tolerante a `ret=3`)
-- [ ] Capa de primitivas de movimiento (`agarrar()`, `muevete_a()`, …)
+- [ ] Capa de primitivas de movimiento (`home()`, `mover_a()`, `agarrar()`, …)
 - [ ] Capa de validación de seguridad ROS2 (bloqueo de trayectorias imposibles)
 - [ ] Prueba end-to-end: comando en lenguaje natural → código Python → ejecución validada
 - [ ] **Futuro:** MoveIt2 para planeación con evasión de colisiones
@@ -233,11 +270,11 @@ ros2 launch xarm_moveit_config xarm7_moveit_fake.launch.py
 
 ## Contenedor UFACTORY Studio (opcional)
 
-`uf_software` incluye UFACTORY Studio, una GUI web en el puerto `18333`. **Actualmente la
-GUI web no conecta con el firmware simulado** (el backend no abre el socket desde un
-contenedor nuevo) y se ha descartado como vía de trabajo: Studio es solo visualización y
-no aporta al flujo de control elegido. El firmware y los servicios `/xarm/*` funcionan de
-forma independiente a la GUI.
+`uf_software` incluye UFACTORY Studio, una GUI web en el puerto `18333`. **La GUI web no
+conecta con el firmware simulado** (el backend no abre el socket desde un contenedor nuevo)
+y se ha descartado como vía de trabajo: Studio es solo visualización y no aporta al flujo
+de control elegido. El firmware y los servicios `/xarm/*` funcionan de forma independiente
+a la GUI.
 
 Si en el futuro se quiere la UI, la opción es correr Studio de escritorio en el host
 apuntando a `127.0.0.1` con `uf_software` levantado — con expectativa baja y sin bloquear

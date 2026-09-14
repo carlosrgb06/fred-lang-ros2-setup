@@ -77,7 +77,77 @@ y forma, por lo que este manual está sujeto a cambios en cualquier momento.
 
 ## 2. Visión general del sistema
 
-<!-- PENDIENTE -->
+### 2.1 El problema que resuelve
+
+Controlar un robot hoy en día es mucho más sencillo que hace 10 años, pero con el avance
+actual en inteligencia artificial consideramos que puede serlo aún más. Hoy se necesita
+conocimiento técnico en ROS o ROS2, saber programar, y entender las arquitecturas de
+sistemas ya creados — y para cada robot todo es diferente.
+
+Lo que se busca es facilitar ese trabajo, empezando por la familia de robots xArm; el cómo
+sucede es lo que explica este manual. La idea es crear un sistema en el que un LLM pueda
+ejecutar las primitivas de un robot a partir de un input en lenguaje natural. Es decir,
+construir una **capa de simplificación** entre el controlador del robot y el LLM, para que
+este pueda traducir el lenguaje natural a código que controle al robot de manera sencilla.
+
+Todo esto sin ignorar los procesos de seguridad que hay que tomar en cuenta al controlar un
+robot en ambientes con o sin humanos alrededor, y sin ignorar cómo la IA llegó a su
+resultado: todo es auditable a través del código Python, que usa librerías que nosotros
+mismos escribimos.
+
+### 2.2 Diagrama de arquitectura
+
+El sistema se basa actualmente en dos contenedores de Docker, para facilitar su
+portabilidad.
+
+El primer contenedor corre una imagen de la distribución ROS2 Jazzy Jalisco que contiene
+todos los paquetes necesarios para conectarse al robot a través de la API de ROS2
+proporcionada por UFACTORY (`xarm_ros2`), además de la librería `FredArm` en el paquete
+`fred_lang_driver`.
+
+El segundo contenedor es otro recurso proporcionado por UFACTORY: al levantarlo con el
+script `run_uf_studio.sh`, se crea un firmware simulado del xArm6 (el modelo se puede
+modificar dentro del script). Esto permite trabajar incluso cuando no se tiene el robot
+físico, lo cual ha impulsado el desarrollo del proyecto.
+
+Ambos contenedores se levantan con la bandera `--network host`, lo que facilita la
+comunicación entre ellos. El contenedor `uf_software` expone los nodos, tópicos, servicios y
+acciones de ROS2 que expondría el xArm físico; desde el contenedor `fred-lang-jazzy` creamos
+clientes a esos servicios y nos suscribimos a esos tópicos.
+
+```
+┌─────────────────────────────┐        servicios ROS2        ┌──────────────────────────────┐
+│  uf_software                │  ◄─────────────────────────  │  fred-lang-jazzy             │
+│  (firmware simulado xArm6)  │                              │  (ROS2 Jazzy)                │
+│                             │        TCP 502 / 30000-3     │                              │
+│  danielwang123321/          │  ◄─────────────────────────  │  ├─ driver xarm_api (C++)    │
+│  uf-ubuntu-docker           │                              │  │   expone /xarm/*          │
+│                             │                              │  ├─ FredArm (cliente Python) │
+│  puerto 18333 (Studio web)  │                              │  └─ xarm_ros2 (submódulo)    │
+└─────────────────────────────┘                              └──────────────────────────────┘
+```
+
+### 2.3 Decisiones de diseño fundamentales
+
+**API nativa en vez de MoveIt2.** El control se hace vía los servicios `/xarm/*` del driver,
+no vía MoveIt2. MoveIt2 y Gazebo quedan diferidos como infraestructura futura. La razón no es
+una limitación de hardware, sino de necesidad: actualmente las trayectorias son punto a punto
+y simples, sin necesidad de planificación con evasión de obstáculos. Añadir MoveIt2 ahora
+sería sumar una capa de complejidad considerable sin beneficio para lo que el proyecto hace
+hoy. En algún punto se necesitará —y entonces se implementará— porque la seguridad tanto del
+operador como del robot es la prioridad más alta del proyecto.
+
+**Cliente de servicios en vez de wrapper del SDK de Python.** Se decidió que `FredArm` fuera
+un cliente de los servicios `/xarm/*` y no un wrapper del SDK de Python, para tener una
+portabilidad 1:1 entre el trabajo simulado y el hardware real. El mismo código sirve en ambos
+casos (solo cambia la IP del robot), lo que permite hacer un sinfín de pruebas sin estar en
+el laboratorio, y facilitará el entrenamiento del VLA en el futuro.
+
+**Diseñado para el xArm6, con estructura genérica.** Toda la librería se diseña para el
+xArm6, que es el modelo con el que podemos trabajar en el laboratorio, pero manteniendo una
+estructura genérica para poder escalar a cualquier modelo de xArm. El fin es poder
+implementar esto como una herramienta de gran escala, tanto dentro de la universidad como
+fuera de ella.
 
 ---
 

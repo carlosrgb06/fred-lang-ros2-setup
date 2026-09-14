@@ -391,11 +391,32 @@ script `run_uf_studio.sh`), nunca revivir uno viejo con `docker start`.
 tópicos de ROS2 es el desajuste de QoS: si el perfil de calidad de servicio del suscriptor
 no coincide con el del publisher, los mensajes no llegan y el callback nunca se ejecuta, sin
 ningún error visible. Antes de suscribirse a `/xarm/robot_states` se verificó su QoS con
-`ros2 topic info /xarm/robot_states --verbose`, que reportó RELIABLE + VOLATILE, que es el
+`ros2 topic info /xarm/robot_states --verbose`, que reportó RELIABLE + VOLATILE — que es el
 perfil por defecto de ROS2. Por eso bastó pasar una profundidad de cola simple (`10`) al
 crear la suscripción. La lección general: verificar siempre el QoS del publisher antes de
 suscribirse, porque otros tópicos del xArm (como `/joint_states`) usan BEST_EFFORT y ahí una
 profundidad simple fallaría en silencio.
+
+### 5.3 Lecciones de workflow
+
+Prácticas de trabajo que se consolidaron durante el desarrollo y conviene seguir.
+
+**El ciclo es siempre build → source → run.** Tras cada `colcon build`, hay que volver a
+hacer `source` del workspace en la misma terminal antes de correr el nodo. El `source`
+captura el estado del `install/` en el momento en que se ejecuta; si se compila después de
+haber sourceado, la terminal sigue viendo el entorno viejo y los cambios no surten efecto (o
+el paquete no aparece). Editar código sin recompilar tiene el mismo efecto: se corre la
+versión anterior.
+
+**El primer build de un paquete nuevo debe ser completo.** La primera vez que se compila un
+paquete recién creado, conviene hacer `colcon build` sin `--packages-select`, para que el
+`setup.bash` raíz del workspace lo registre correctamente. Una vez registrado, los builds
+selectivos (`--packages-select fred_lang_driver`) ya funcionan bien para iterar rápido.
+
+**El código se separa de los artefactos de compilación.** El código del proyecto vive en el
+host y se monta dentro del contenedor; los directorios `build/`, `install/` y `log/` que
+genera `colcon` no se versionan (se excluyen mediante `.gitignore`). Esto mantiene el repo
+limpio y evita subir megas de archivos regenerables.
 
 ---
 

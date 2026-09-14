@@ -327,7 +327,39 @@ Las unidades son la fuente de error más común. La regla:
 
 ## 5. Notas de ingeniería
 
-<!-- PENDIENTE -->
+Esta sección documenta los problemas no triviales que surgieron durante el desarrollo, su
+causa raíz y cómo se resolvieron. Sirve para que un futuro desarrollador no repita el mismo
+camino de depuración.
+
+### 5.1 El `ret=3` de `motion_enable`
+
+Al llamar a `motion_enable` en el firmware simulado, el servicio devuelve `ret=3`
+(RES_TIMEOUT), mientras que `set_mode` y `set_state` y todos los demás comandos de
+movimiento devuelven `ret=0` sin problema.
+
+La causa es que el SDK de C++ v1.18.1 (el que compila el driver de `xarm_api`) espera de
+forma bloqueante una trama de respuesta al opcode `MOTION_EN` con el transaction-id
+correcto. El firmware v2.4.0 del simulador nunca envía esa trama; esto se verificó esperando
+hasta 20 segundos. El resto de los opcodes (`SET_MODE`, `SET_STATE`, `MOVE_LINE`) sí
+responden normalmente. El SDK de Python (1.18.4) no depende de ese ACK, por eso contra él el
+mismo comando devuelve `ret=0`.
+
+A pesar del `ret=3`, los servos sí se habilitan. Se comprobó con un binario de C++ mínimo
+que, tras el `motion_enable`, el estado de los motores reporta todos los ejes habilitados, y
+los comandos de movimiento posteriores ejecutan correctamente (los ángulos y la pose del TCP
+cambian). El `ret=3` es un falso negativo del ACK, no un fallo de la operación.
+
+**Cómo lo maneja `FredArm`.** La librería no aborta ante el `ret=3`. En vez de jalar el
+cable a todo el proceso, se verifica el resultado leyendo `/xarm/robot_states`:
+`servos_ok()` nos confirma que los servos están habilitados a través del bitmask `mt_able`,
+y `esperar_listo()` confirma que el brazo llegó al estado READY/STANDBY sin ningún error. Es
+decir, contrastamos el estado observado del robot a través de los tópicos de ROS2, no contra
+el código de retorno del servicio `motion_enable`.
+
+> **Implicaciones reales:** este comportamiento es específico del firmware v2.4.0 del
+> simulador. Contra un xArm físico, `motion_enable` probablemente devuelva `ret=0`. Como
+> `FredArm` verifica el estado observado en lugar de confiar solo en el `ret`, funciona en
+> ambos casos sin cambios.
 
 ---
 

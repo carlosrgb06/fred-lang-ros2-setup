@@ -23,7 +23,55 @@
 
 ## 1. Introducción
 
-<!-- PENDIENTE -->
+### 1.1 Qué es FrED-LANG
+
+La meta con la que se creó el proyecto es construir un sistema que sirva como predecesor de
+un VLA (Vision-Language-Action), y que a la vez facilite la interacción humano-robot. Hoy en
+día, controlar un robot exige experiencia técnica; lo que este proyecto propone es que
+controlarlo mediante lenguaje natural sea posible, usando un LLM como intérprete.
+
+Este repositorio contiene la **capa de infraestructura ROS2** y el gemelo digital: el
+entorno reproducible, el driver del robot y la librería de control (`FredArm`) sobre la que
+se construyen las primitivas de alto nivel.
+
+**Pipeline del sistema:**
+
+```
+   Persona            LLM              Python           ROS2            xArm6
+  "agarra la    →   traduce a     →   primitivas   →  validación  →   ejecución
+  pieza roja"      código Python     de movimiento    de seguridad    en el robot
+```
+
+**Principios de diseño:**
+
+- **Seguridad** — ROS2 bloquea trayectorias imposibles antes de mover el brazo. Cero choques.
+- **Interpretabilidad** — no es una "caja negra": si algo falla, el script de Python
+  generado es legible y auditable.
+
+La visión a largo plazo es usar este pipeline como generador de datos para entrenar un
+modelo Vision-Language-Action (VLA) end-to-end.
+
+### 1.2 Propósito del manual
+
+Este manual tiene una tarea simple: documentar todo lo que se hizo durante la construcción de
+la infraestructura que se utiliza dentro del proyecto. El documento servirá tanto al autor
+como a los futuros ingenieros que trabajen sobre el sistema y el entorno que se ha construido
+para cumplir con el objetivo del proyecto.
+
+Aquí se explica cómo funciona la capa de control, cómo utilizarla y por qué se tomaron las
+decisiones que se tomaron en su momento. De esta manera, cuando alguien quiera incorporarse
+al proyecto, tendrá una guía para entender cómo se estructuró todo y por qué se estructuró
+así. Este proyecto tiene una meta ambiciosa, mas no imposible; por eso es importante
+documentar todo lo ocurrido, para que cuando se escale se haga de forma ordenada y consciente
+de toda la estructura del sistema.
+
+### 1.3 Alcance
+
+El proyecto sigue en desarrollo, por lo que este manual no está completo. Todavía no
+documenta la integración del entorno creado en ROS2 con el LLM que se usará para la primera y
+segunda parte del pipeline. Tampoco hay documentación sobre el VLA que se pretende crear y
+entrenar con los datos que generará este sistema. Todo esto se documentará a su debido tiempo
+y forma, por lo que este manual está sujeto a cambios en cualquier momento.
 
 ---
 

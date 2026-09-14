@@ -153,7 +153,119 @@ fuera de ella.
 
 ## 3. Entorno de desarrollo
 
-<!-- PENDIENTE -->
+Esta sección describe cómo replicar el entorno desde cero y ponerlo a correr. El entorno es
+completamente reproducible: clonar el repositorio y construir la imagen es suficiente, sin
+necesidad de instalar ROS2 ni compilar nada a mano en el host.
+
+### 3.1 Prerrequisitos
+
+- **Docker** (`docker --version` para confirmar).
+- Para gráficos (RViz2, opcional): **X11** corriendo en el host y acceso al dispositivo
+  gráfico `/dev/dri`.
+- **No** se requiere `docker compose` — el proyecto usa `docker build` / `docker run`
+  directo.
+
+### 3.2 Los dos contenedores y por qué están separados
+
+El sistema usa dos contenedores (ver [sección 2.2](#22-diagrama-de-arquitectura)):
+
+- **`fred-lang-jazzy`** — la imagen que compilamos nosotros: ROS2 Jazzy + `xarm_ros2` +
+  `fred_lang_driver`.
+- **`uf_software`** — el firmware simulado del xArm, provisto por UFACTORY.
+
+Están separados a propósito. `uf_software` es una imagen de terceros ya construida
+(`danielwang123321/uf-ubuntu-docker`), no parte del stack que compilamos, así que no tiene
+sentido fusionarla en nuestro Dockerfile. Se maneja como un contenedor independiente que se
+levanta con su propio script.
+
+### 3.3 Instalación y build
+
+**1. Clonar con el submódulo de `xarm_ros2`.**
+
+```bash
+git clone --recursive https://github.com/carlosrgb06/fred-lang-ros2-setup.git
+cd fred-lang-ros2-setup
+```
+
+Si ya se clonó sin `--recursive`:
+
+```bash
+git submodule update --init --recursive
+```
+
+**2. Construir la imagen de ROS2.**
+
+```bash
+docker build -t fred-lang-jazzy .
+```
+
+Esto compila `xarm_ros2` completo (incluido `xarm_gazebo`) dentro de la imagen; tarda varios
+minutos la primera vez. Nota: `xarm_gazebo` se compila siempre aunque la máquina no tenga
+GPU, porque compilar no requiere aceleración gráfica (solo *ejecutar* Gazebo con render la
+necesita). Además `xarm_moveit_config` depende de `xarm_gazebo`, así que omitir su
+compilación rompe el build completo.
+
+### 3.4 Puesta en marcha — los tres contextos
+
+El flujo de desarrollo requiere tres contextos corriendo en paralelo.
+
+**Contexto 1 — Firmware simulado (`uf_software`).**
+
+```bash
+./scripts/run_uf_studio.sh
+# ya dentro del contenedor:
+./xarm_scripts/xarm_start.sh 6 6; exec /bin/bash
+```
+
+El argumento `6 6` corresponde al xArm6 (la tabla de modelos de `xarm_start.sh` es
+`<axis> <type>`: `5 5`=xArm5, `6 6`=xArm6, `7 7`=xArm7, `6 9`=Lite6, `6 12`=850).
+
+> **Importante:** `uf_software` debe recrearse con `--network host` (el script ya lo hace).
+> Revivir un contenedor previo con `docker start` lo deja en red `bridge` y el driver no
+> logra conectar (ver [sección 5.2](#52-gotchas-del-entorno)).
+
+**Contexto 2 — Driver `xarm_api` (`fred-lang-jazzy`).**
+
+```bash
+./scripts/run_container.sh
+# ya dentro:
+ros2 launch xarm_api xarm6_driver.launch.py robot_ip:=127.0.0.1
+```
+
+Se espera el log `[TCP STATUS] CONTROL: 1, REPORT: 1` y se confirman los servicios con
+`ros2 service list | grep /xarm`. El firmware y el driver deben coincidir en modelo:
+firmware `6 6` ↔ `xarm6_driver`. Se puede verificar con
+`ros2 topic echo /xarm/robot_states --once`: el array `angle` debe tener 6 elementos.
+
+**Contexto 3 — Nodo `FredArm` (otra shell en `fred-lang-jazzy`).**
+
+Como el contenedor tiene nombre fijo, se entra directamente sin buscar su ID:
+
+```bash
+docker exec -it fred-lang-jazzy bash
+source /opt/ros/jazzy/setup.bash
+source /root/xarm_ws/install/setup.bash
+ros2 run fred_lang_driver fred_arm
+```
+
+Recordatorio: tras cualquier cambio en el código, el ciclo es **build → source → run** en la
+misma terminal (ver [sección 5.3](#53-lecciones-de-workflow)).
+
+### 3.5 El simulador de firmware
+
+El contenedor `uf_software` expone los mismos nodos, tópicos, servicios y acciones de ROS2
+que expondría el xArm físico. Esto es lo que permite desarrollar y probar sin el robot real,
+y es también la razón por la que el código transfiere 1:1 al hardware.
+
+El contenedor incluye además una GUI web de UFACTORY Studio en el puerto `18333`, pero **esta
+GUI no se usa**: no logra conectar con el firmware simulado y se ha descartado como vía de
+trabajo (es solo visualización y no aporta al flujo de control elegido). El firmware y los
+servicios `/xarm/*` funcionan de forma independiente a la GUI.
+
+> **Nota sobre la simulación fake de ROS2.** Existe un launch alternativo
+> (`xarm6_moveit_fake.launch.py`) que simula solo la cinemática para visualizar en RViz2.
+> **No expone los servicios `/xarm/*`**, así que no sirve para probar la API nativa — para
+> eso se usa el flujo de tres contextos descrito arriba.
 
 ---
 

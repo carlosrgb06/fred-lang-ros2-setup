@@ -391,7 +391,7 @@ script `run_uf_studio.sh`), nunca revivir uno viejo con `docker start`.
 tópicos de ROS2 es el desajuste de QoS: si el perfil de calidad de servicio del suscriptor
 no coincide con el del publisher, los mensajes no llegan y el callback nunca se ejecuta, sin
 ningún error visible. Antes de suscribirse a `/xarm/robot_states` se verificó su QoS con
-`ros2 topic info /xarm/robot_states --verbose`, que reportó RELIABLE + VOLATILE — que es el
+`ros2 topic info /xarm/robot_states --verbose`, que reportó RELIABLE + VOLATILE, que es el
 perfil por defecto de ROS2. Por eso bastó pasar una profundidad de cola simple (`10`) al
 crear la suscripción. La lección general: verificar siempre el QoS del publisher antes de
 suscribirse, porque otros tópicos del xArm (como `/joint_states`) usan BEST_EFFORT y ahí una

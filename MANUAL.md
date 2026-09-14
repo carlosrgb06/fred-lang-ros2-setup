@@ -242,23 +242,83 @@ reactivar el movimiento.
 
 ### 4.4 Conceptos clave
 
-<!-- TU TEXTO: los conceptos que hay que entender para usar bien la librería. -->
+Cuatro conceptos que hay que entender para usar la librería correctamente y evitar los
+errores más comunes.
 
 #### Espacio articular vs. espacio cartesiano
 
-<!-- joint-space vs Cartesian-space -->
+Un brazo robótico físicamente solo sabe hacer una cosa: mover los motores de sus juntas a
+ciertos ángulos. Un xArm6 tiene 6 juntas, es decir, 6 ángulos. Sobre esa base existen dos
+formas de comandar un movimiento:
+
+**Espacio articular (joint space)** — se le dan los 6 ángulos directamente
+(`set_servo_angle`). El brazo mueve cada motor a su ángulo, sin cálculos intermedios. Es
+predecible y sin ambigüedad: un conjunto de ángulos corresponde a una única configuración
+física. Su desventaja es que resulta antinatural para tareas: nadie sabe de memoria qué
+ángulos ponen la punta sobre un objeto.
+
+**Espacio cartesiano (Cartesian space)** — se le da la pose deseada del efector final
+(TCP): posición XYZ más orientación (`set_position`). El brazo resuelve por **cinemática
+inversa** qué ángulos producen esa pose. Es la forma natural de pensar una tarea ("ve a
+estas coordenadas"), a costa de que el firmware debe resolver la IK, con sus sutilezas:
+puede haber varias soluciones, ninguna (fuera de alcance), o pasar por una singularidad.
+
+En este proyecto el flujo principal es **cartesiano**, porque una cámara percibe el mundo
+en coordenadas, no en ángulos — lo que se alinea con el futuro modelo VLA. El espacio
+articular se reserva para poses fijas conocidas, como el home, donde guardar los ángulos
+evita recalcular la cinemática inversa cada vez.
 
 #### La máquina de estados y modos del xArm
 
-<!-- tablas de state y mode -->
+El brazo tiene un **modo** (qué tipo de control acepta) y un **estado** (en qué situación
+de ejecución está). Ambos se leen en `/xarm/robot_states`.
+
+Modos (`mode`):
+
+| Valor | Significado |
+|---|---|
+| 0 | Posición — control punto a punto (el usado en este proyecto) |
+| 1 | Servoj — planificador de trayectoria externo |
+| 2 | Teaching / Free-Drive — gravedad compensada |
+| 4 / 5 | Control de velocidad articular / cartesiana |
+| 6 / 7 | Replanning dinámico online (articular / cartesiano) |
+
+Estados (`state`):
+
+| Valor | Significado |
+|---|---|
+| 1 | RUNNING — ejecutando un comando de movimiento |
+| 2 | SLEEPING — sin ejecución, listo para moverse (READY) |
+| 3 | PAUSED — pausado a mitad de un movimiento |
+| 4 | STOPPED — no listo para comandos |
+| 5 | CONFIG_CHANGED — cambió configuración o modo, no listo |
+
+Al arrancar en frío, el brazo suele reportar `state=5`. La secuencia de arranque
+(`motion_enable → set_mode → set_state(0)`) lo lleva a READY.
 
 #### Estados fijados vs. estados leídos
 
-<!-- set_state(0) se reporta como state:2 -->
+Un punto que causa confusión: **los valores de estado que se *fijan* con `set_state` no son
+los mismos que se *leen* en `/xarm/robot_states`.** Son dos tablas distintas.
+
+Cuando se llama `set_state(0)` (STANDBY), el feedback del robot **no** reporta `0` —
+reporta `state=2` (READY). Es el comportamiento esperado: `set_state(0)` significa "ponte
+listo", y el estado leído que corresponde a "listo" es el `2`. Además, `set_state(0)`
+limpia el código de error de forma implícita.
+
+Por eso `esperar_listo()` compara contra `state == 2` (el valor *leído*), no contra el `0`
+que se fijó.
 
 #### Unidades
 
-<!-- rad para ángulos; mm + rad para pose -->
+Las unidades son la fuente de error más común. La regla:
+
+- **Ángulos** (`set_servo_angle`): siempre en **radianes**. Nunca grados. Enviar `90`
+  pensando en grados equivale a 90 radianes — un giro absurdo.
+- **Pose** (`set_position`): es una lista `[x, y, z, roll, pitch, yaw]` con **unidades
+  mixtas** — posición (`x, y, z`) en **milímetros**, orientación (`roll, pitch, yaw`) en
+  **radianes**. Por ejemplo, en `[300, 0, 250, 3.14, 0, 0]`, los primeros tres valores son
+  mm y el `3.14` es π radianes (punta apuntando hacia abajo).
 
 ---
 

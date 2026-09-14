@@ -361,6 +361,42 @@ el código de retorno del servicio `motion_enable`.
 > `FredArm` verifica el estado observado en lugar de confiar solo en el `ret`, funciona en
 > ambos casos sin cambios.
 
+### 5.2 Gotchas del entorno
+
+Tres problemas de configuración que costaron tiempo de depuración y cuya causa no era obvia
+desde el síntoma.
+
+**El paquete de Python no aparecía tras compilar.** Al crear `fred_lang_driver`,
+`colcon build` terminaba "exitoso" pero `ros2 run` respondía *Package not found*, y el
+paquete no figuraba en `AMENT_PREFIX_PATH` aunque sí existiera en disco. Hubo dos causas
+encadenadas. Primera: hacer el primer build de un paquete nuevo con `--packages-select`
+dejaba el `setup.bash` raíz del workspace desincronizado, sin registrar el paquete.
+Segunda, la de fondo: el `package.xml` tenía una etiqueta XML mal cerrada
+(`<exec_depend>...<exec_depend>` en vez de `</exec_depend>`), lo que hacía que `colcon`
+procesara el paquete a medias — compilaba el código pero no generaba los archivos de
+encadenamiento del entorno, todo sin lanzar ningún error. La lección: cuando la
+infraestructura de un paquete parece rota sin motivo, recrearlo desde cero con
+`ros2 pkg create` es más rápido que depurarla. Y la verdad de fondo sobre si ROS2 ve un
+paquete no es buscar archivos a mano, sino `ros2 pkg executables <paquete>`.
+
+**El driver se colgaba al conectar.** En algún momento el driver `xarm_api` se quedaba
+colgado en `connect()` sin llegar a anunciar sus servicios. La causa no estaba en el
+driver, sino en el contenedor del firmware: `uf_software` se había levantado en la red
+`bridge` de Docker (con IP `172.17.0.2`) en vez de `--network host`. Esto pasa porque
+`docker start` sobre un contenedor existente reutiliza su configuración de red original. La
+solución es recrear el contenedor siempre con `docker run --network host` (lo que hace el
+script `run_uf_studio.sh`), nunca revivir uno viejo con `docker start`.
+
+**El callback de la suscripción nunca se disparaba.** Un riesgo latente al suscribirse a
+tópicos de ROS2 es el desajuste de QoS: si el perfil de calidad de servicio del suscriptor
+no coincide con el del publisher, los mensajes no llegan y el callback nunca se ejecuta, sin
+ningún error visible. Antes de suscribirse a `/xarm/robot_states` se verificó su QoS con
+`ros2 topic info /xarm/robot_states --verbose`, que reportó RELIABLE + VOLATILE — que es el
+perfil por defecto de ROS2. Por eso bastó pasar una profundidad de cola simple (`10`) al
+crear la suscripción. La lección general: verificar siempre el QoS del publisher antes de
+suscribirse, porque otros tópicos del xArm (como `/joint_states`) usan BEST_EFFORT y ahí una
+profundidad simple fallaría en silencio.
+
 ---
 
 ## 6. Guía de uso — ejemplos

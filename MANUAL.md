@@ -93,7 +93,7 @@ set_position(...)
 
 Esta separación da una doble ventaja. Por un lado, las primitivas de alto nivel encapsulan
 secuencias ya validadas: el LLM no puede equivocarse en *cómo* se ejecuta un movimiento,
-solo en *cuándo* — lo que reduce la superficie de error y refuerza el principio de
+solo en *cuándo*, lo que reduce la superficie de error y refuerza el principio de
 **seguridad** del proyecto. Por otro, un script escrito con estos verbos se lee como una
 receta, lo que sostiene el principio de **interpretabilidad**: cualquiera puede auditar qué
 hará el robot sin descifrar llamadas de bajo nivel.

@@ -314,11 +314,14 @@ que se fijó.
 Las unidades son la fuente de error más común. La regla:
 
 - **Ángulos** (`set_servo_angle`): siempre en **radianes**. Nunca grados. Enviar `90`
-  pensando en grados equivale a 90 radianes. Lo mismo pasa con los campos de velocidad `speed` y `acc`, estas tienen unidades de rad/s y rad/s² respectivamente.
+  pensando en grados equivale a 90 radianes. Lo mismo pasa con los campos de velocidad
+  `speed` y `acc`, estas tienen unidades de rad/s y rad/s² respectivamente.
 - **Pose** (`set_position`): es una lista `[x, y, z, roll, pitch, yaw]` con **unidades
   mixtas** — posición (`x, y, z`) en **milímetros**, orientación (`roll, pitch, yaw`) en
   **radianes**. Por ejemplo, en `[300, 0, 250, 3.14, 0, 0]`, los primeros tres valores son
-  mm y el `3.14` es π radianes (punta apuntando hacia abajo). Cuando utilizamos el modo de control cartesiano la velocidad y la aceleracion (`speed` y `acc`) tienen unidades de mm/s y mm/s² respectivamente.
+  mm y el `3.14` es π radianes (punta apuntando hacia abajo). Cuando utilizamos el modo de
+  control cartesiano la velocidad y la aceleración (`speed` y `acc`) tienen unidades de
+  mm/s y mm/s² respectivamente.
 
 ---
 

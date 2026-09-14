@@ -93,7 +93,7 @@ set_position(...)
 
 Esta separación da una doble ventaja. Por un lado, las primitivas de alto nivel encapsulan
 secuencias ya validadas: el LLM no puede equivocarse en *cómo* se ejecuta un movimiento,
-solo en *cuándo*, lo que reduce la superficie de error y refuerza el principio de
+solo en *cuándo* — lo que reduce la superficie de error y refuerza el principio de
 **seguridad** del proyecto. Por otro, un script escrito con estos verbos se lee como una
 receta, lo que sostiene el principio de **interpretabilidad**: cualquiera puede auditar qué
 hará el robot sin descifrar llamadas de bajo nivel.
@@ -119,8 +119,24 @@ Todos los métodos que llaman a un servicio siguen el mismo patrón (el "molde")
 5. Leer el resultado            return future.result().ret
 ```
 
-<!-- TU TEXTO: explica el porqué de call_async + spin_until_future_complete
-     (el tema del hilo del executor, por qué no es síncrono directo). -->
+En el sistema de servicios de ROS2, las llamadas y sus respuestas no llegan al instante:
+los procesos que emplean parte de las funciones de `FredArm` son **asíncronos**. Cuando
+usamos `call_async`, este no nos devuelve la respuesta que esperamos, sino un **`future`**
+— que en términos simples es una promesa de que llegará un resultado más adelante.
+
+Por eso necesitamos `spin_until_future_complete`: este corre el executor de ROS2 hasta que
+ese `future` se completa, y solo entonces nos devuelve el control. Es el **puente** entre
+los procesos asíncronos de ROS2 y una API síncrona cómoda de usar, como la que exponemos
+en nuestro código:
+
+```python
+ret = arm.set_mode(0)
+```
+
+Desde el punto de vista de quien llama, esa línea se comporta como una función normal:
+bloquea hasta tener el resultado y devuelve el `ret` directamente. Toda la complejidad
+asíncrona queda encapsulada dentro del método, de modo que las capas superiores —y el
+LLM— pueden encadenar comandos sin lidiar con `future`s ni con el executor.
 
 ### 4.3 Referencia de la API — Capa 1
 

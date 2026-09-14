@@ -122,7 +122,7 @@ Todos los métodos que llaman a un servicio siguen el mismo patrón (el "molde")
 En el sistema de servicios de ROS2, las llamadas y sus respuestas no llegan al instante:
 los procesos que emplean parte de las funciones de `FredArm` son **asíncronos**. Cuando
 usamos `call_async`, este no nos devuelve la respuesta que esperamos, sino un **`future`**
-— que en términos simples es una promesa de que llegará un resultado más adelante.
+que en términos simples es una promesa de que llegará un resultado más adelante.
 
 Por eso necesitamos `spin_until_future_complete`: este corre el executor de ROS2 hasta que
 ese `future` se completa, y solo entonces nos devuelve el control. Es el **puente** entre
@@ -135,8 +135,8 @@ ret = arm.set_mode(0)
 
 Desde el punto de vista de quien llama, esa línea se comporta como una función normal:
 bloquea hasta tener el resultado y devuelve el `ret` directamente. Toda la complejidad
-asíncrona queda encapsulada dentro del método, de modo que las capas superiores —y el
-LLM— pueden encadenar comandos sin lidiar con `future`s ni con el executor.
+asíncrona queda encapsulada dentro del método, de modo que las capas superiores y el
+LLM pueden encadenar comandos sin lidiar con `future`s ni con el executor.
 
 ### 4.3 Referencia de la API — Capa 1
 

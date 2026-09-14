@@ -51,15 +51,21 @@ Python: habla únicamente con el driver oficial C++ (`xarm_api`) a través de se
 ROS2. La ventaja clave es la **portabilidad 1:1**: el mismo código funciona contra el
 simulador (`robot_ip:=127.0.0.1`) y contra el xArm6 físico cambiando solo la IP.
 
-**Métodos actuales de `FredArm`:**
+**Métodos actuales de `FredArm` (Capa 1 — bajo nivel):**
 
-| Método | Servicio | Función |
-|---|---|---|
-| `motion_enable(enable, id=8)` | `/xarm/motion_enable` | Habilita/deshabilita los servos |
-| `set_mode(mode)` | `/xarm/set_mode` | Fija el modo de operación (0 = posición) |
-| `set_state(state)` | `/xarm/set_state` | Fija el estado (0 = READY) |
-| `set_position(pose, ...)` | `/xarm/set_position` | Movimiento cartesiano (el firmware resuelve IK) |
-| `set_servo_angle(angles, ...)` | `/xarm/set_servo_angle` | Movimiento articular (ángulos directos) |
+| Grupo | Método | Servicio / fuente | Función |
+|---|---|---|---|
+| Arranque | `motion_enable(enable, id=8)` | `/xarm/motion_enable` | Habilita/deshabilita los servos |
+| Arranque | `set_mode(mode)` | `/xarm/set_mode` | Fija el modo (0 = posición) |
+| Arranque | `set_state(state)` | `/xarm/set_state` | Fija el estado (0 = READY) |
+| Movimiento | `set_position(pose, ...)` | `/xarm/set_position` | Movimiento cartesiano (el firmware resuelve IK) |
+| Movimiento | `set_servo_angle(angles, ...)` | `/xarm/set_servo_angle` | Movimiento articular (ángulos directos) |
+| Movimiento | `move_gohome(...)` | `/xarm/move_gohome` | Home de fábrica (articular) |
+| Estado | `hay_error()` | tópico `robot_states` | ¿Hay código de error? |
+| Estado | `servos_ok()` | tópico `robot_states` | ¿Servos habilitados? (bitmask `mt_able`) |
+| Estado | `esperar_listo(timeout)` | tópico `robot_states` | Bloquea hasta READY, sin error, servos ok |
+| Estado | `get_angulos()` | tópico `robot_states` | Ángulos articulares actuales |
+| Recuperación | `clean_error()` | `/xarm/clean_error` | Limpia el código de error |
 
 **Decisión de arquitectura — API nativa sobre MoveIt2.** El control se hace vía los
 servicios `/xarm/*` del driver, no vía MoveIt2. MoveIt2 y Gazebo quedan diferidos como
@@ -72,6 +78,13 @@ pose del efector final y el firmware resuelve la cinemática inversa). El flujo 
 **cartesiano** (`set_position`), porque se alinea con cómo una cámara percibe el mundo —
 coordenadas, no ángulos — de cara al futuro modelo VLA. El articular se reserva para poses
 fijas conocidas como el *home*, donde guardar los ángulos evita recalcular IK.
+
+**Lectura de estado.** `FredArm` se suscribe al tópico `/xarm/robot_states` y guarda el
+último mensaje. Sobre él construye verificación: `esperar_listo()` bloquea (haciendo
+`spin_once`) hasta que el brazo esté en READY, sin error y con los servos habilitados. Esto
+convierte cada comando de "manda y reza" a "manda y confirma" — la base de las primitivas
+seguras de alto nivel. `wait=True` en un movimiento solo garantiza que *terminó*;
+`esperar_listo()` garantiza que *terminó bien*.
 
 ---
 
@@ -159,7 +172,7 @@ ros2 run fred_lang_driver fred_arm
 ```
 
 El `main()` de ejemplo ejecuta la secuencia de arranque
-(`motion_enable → set_mode → set_state`) y un movimiento de prueba.
+(`motion_enable → set_mode → set_state`) y movimientos de prueba con verificación de estado.
 
 ---
 
@@ -171,16 +184,18 @@ El `main()` de ejemplo ejecuta la secuencia de arranque
 | Firmware simulado xArm6 end-to-end | ✅ Funcional |
 | Driver `xarm_api` conectado al simulador | ✅ Funcional |
 | Paquete `fred_lang_driver` (ament_python) | ✅ Creado y compilado |
-| Secuencia de arranque (`motion_enable`, `set_mode`, `set_state`) | ✅ Validada |
-| Movimiento cartesiano (`set_position`) | ✅ Validado — el brazo se mueve |
-| Movimiento articular (`set_servo_angle`) | ✅ Validado — el brazo se mueve |
-| Suscripción a `/xarm/robot_states` (lectura de estado) | 🚧 Siguiente |
-| `enable()` tolerante a `ret=3` (verifica estado) | 🚧 Siguiente |
-| Primitivas de alto nivel + integración con LLM | ⏳ Planeado |
+| **Capa 1 — control de bajo nivel** | ✅ **Completa y probada** |
+| ↳ Arranque (`motion_enable`, `set_mode`, `set_state`) | ✅ Validado |
+| ↳ Movimiento (`set_position`, `set_servo_angle`, `move_gohome`) | ✅ Validado — el brazo se mueve |
+| ↳ Lectura de estado (suscripción + `esperar_listo`, `hay_error`, `servos_ok`, `get_angulos`) | ✅ Validado |
+| ↳ Recuperación (`clean_error`) | ✅ Validado |
+| Capa 3 — primitivas de alto nivel (`home`, `mover_a`, …) | 🚧 Siguiente |
+| Pinza / gripper | ⏳ Pendiente de hardware (el sim no expone actuador) |
+| Integración con LLM | ⏳ Planeado |
 
-Ambos métodos de movimiento están verificados objetivamente contra el simulador: tras un
-`set_position` la pose del TCP cambia según lo comandado, y tras un `set_servo_angle` los
-ángulos de junta cambian, ambos con `ret=0` y `err=0`.
+Todos los métodos están verificados objetivamente contra el simulador: los movimientos
+cambian la pose/ángulos según lo comandado (`ret=0`, `err=0`), y `esperar_listo()` confirma
+el estado READY tras cada uno leyendo `/xarm/robot_states`.
 
 ---
 
@@ -198,8 +213,8 @@ diagnosticada:
 
 **Verificación de que los servos sí se habilitan:** tras `motion_enable`, el tópico
 `/xarm/robot_states` reporta `mt_able = 255` (máscara de servos activos) y `err = 0`. Por
-eso `FredArm.enable()` (pendiente) no debe abortar ante `ret=3`, sino confirmar el estado
-contra `/xarm/robot_states`.
+eso `FredArm` no aborta ante `ret=3`; confirma el estado con `esperar_listo()` /
+`servos_ok()` en su lugar.
 
 ---
 
@@ -213,14 +228,16 @@ ros2 topic echo /joint_states                 # ángulos articulares (NO cartesi
 ros2 run tf2_ros tf2_echo link_base link_eef  # pose cartesiana del efector final
 ros2 interface show xarm_msgs/srv/MoveCartesian  # definición del servicio de movimiento cartesiano
 ros2 interface show xarm_msgs/srv/MoveJoint      # definición del servicio de movimiento articular
+ros2 interface show xarm_msgs/msg/RobotMsg       # definición del mensaje de estado
 ```
 
 **Tabla de referencia — campos de `robot_states`:**
 
-- `state` (leído): 1 = en movimiento, 2 = READY, 3 = pausado, 4 = deteniéndose.
-  (Nota: los estados que se *fijan* con `set_state` usan otra tabla; `set_state(0)` se
-  reporta como `state: 2`.)
-- `mode`: 0 = posición, 1 = servoj, 4/5 = velocidad, 6/7 = replanning online.
+- `state` (leído): 1 = RUNNING, 2 = SLEEPING (READY), 3 = PAUSED, 4 = STOPPED,
+  5 = CONFIG_CHANGED. (Los estados que se *fijan* con `set_state` usan otra tabla;
+  `set_state(0)` se reporta como `state: 2`.)
+- `mode`: 0 = posición, 1 = servoj, 2 = teaching. (En modo 0 el `set_mode` acepta hasta 7
+  según firmware.)
 - `mt_able`: máscara de bits de servos habilitados.
 - `err` / `warn`: 0 = sin error. `set_state(0)` limpia el error.
 - `angle`: ángulos de junta (6 para xArm6). `pose`: `[x, y, z, roll, pitch, yaw]`
@@ -245,6 +262,7 @@ ros2 launch xarm_moveit_config xarm6_moveit_fake.launch.py
 |---|---|---|
 | Paquete Python nuevo no aparece en `ros2 run` / `ros2 pkg executables` tras `colcon build` | El primer build con `--packages-select` deja el `setup.bash` raíz desincronizado; o un `package.xml` con XML malformado instala el paquete a medias | Primer build de un paquete nuevo **siempre completo** (`colcon build` sin flags) + re-`source`. Si persiste, validar `package.xml` o recrear con `ros2 pkg create`. `ros2 pkg executables <pkg>` es la verdad de fondo para saber si ROS2 lo ve |
 | Cambios en el código no surten efecto al correr el nodo | Falta `colcon build` tras editar, o falta re-`source` tras el build | El ciclo es siempre **build → source → run**, en la misma terminal |
+| El callback de una suscripción nunca se dispara | QoS del suscriptor no coincide con el del publisher | Verificar con `ros2 topic info <topic> --verbose`; igualar Reliability/Durability. (`robot_states` es RELIABLE+VOLATILE = default, basta profundidad 10) |
 | El driver cuelga en `connect()` y no anuncia servicios | `uf_software` quedó en red `bridge` (`docker start` reusa la config previa) | Recrear con `docker run --network host` (lo hace `run_uf_studio.sh`) |
 | Movimiento cartesiano falla con error C40 | Con `motion_type=0` (lineal), la pose objetivo no es alcanzable en línea recta o no tiene IK válida | Usar poses alcanzables cercanas, o considerar `motion_type` 1/2 (requiere firmware >= 1.11.100) |
 | `docker: unknown command: docker compose` | El plugin de compose no está instalado | No es necesario — usar `docker build` / `docker run` directo |
@@ -257,11 +275,12 @@ ros2 launch xarm_moveit_config xarm6_moveit_fake.launch.py
 
 ## Roadmap
 
-- [x] Métodos base de `FredArm`: arranque (`motion_enable`, `set_mode`, `set_state`) y movimiento (`set_position`, `set_servo_angle`)
-- [ ] Suscripción a `/xarm/robot_states` + verificación de estado (`enable()` tolerante a `ret=3`)
-- [ ] Capa de primitivas de movimiento (`home()`, `mover_a()`, `agarrar()`, …)
-- [ ] Capa de validación de seguridad ROS2 (bloqueo de trayectorias imposibles)
+- [x] Métodos base de `FredArm` (Capa 1): arranque, movimiento, lectura de estado, recuperación
+- [ ] Capa 3 — primitivas de alto nivel (`home()`, `mover_a()`, `mover_juntas()`, …) que envuelven la Capa 1 con verificación integrada
+- [ ] Pinza / gripper (pendiente de levantar el firmware con actuador; los servicios de gripper Lite6 usan el tipo `Call`)
+- [ ] Nodo orquestador + integración LLM (Code as Policies vía `exec()`)
 - [ ] Prueba end-to-end: comando en lenguaje natural → código Python → ejecución validada
+- [ ] Migración a hardware real (cambiar `robot_ip`)
 - [ ] **Futuro:** MoveIt2 para planeación con evasión de colisiones
 - [ ] **Futuro:** Gazebo con físicas reales (requiere GPU dedicada)
 - [ ] **Futuro:** pipeline de generación de datos para el modelo VLA

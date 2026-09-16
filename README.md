@@ -51,7 +51,15 @@ Python: habla únicamente con el driver oficial C++ (`xarm_api`) a través de se
 ROS2. La ventaja clave es la **portabilidad 1:1**: el mismo código funciona contra el
 simulador (`robot_ip:=127.0.0.1`) y contra el xArm6 físico cambiando solo la IP.
 
-**Métodos actuales de `FredArm` (Capa 1 — bajo nivel):**
+La librería se organiza en **dos niveles**:
+
+- **Capa 1 — bajo nivel:** clientes directos de los servicios `/xarm/*` y lectura de
+  estado. Devuelven el `ret` crudo del driver; no verifican, no lanzan. Son la base sobre
+  la que se construye todo lo demás y quedan disponibles para uso avanzado.
+- **Capa 3 — alto nivel:** primitivas que envuelven la Capa 1 con verificación integrada y
+  comunican los fallos lanzando `FredArmError` (ver [Primitivas de alto nivel](#primitivas-de-alto-nivel--capa-3)).
+
+**Métodos de `FredArm` (Capa 1 — bajo nivel):**
 
 | Grupo | Método | Servicio / fuente | Función |
 |---|---|---|---|
@@ -63,9 +71,16 @@ simulador (`robot_ip:=127.0.0.1`) y contra el xArm6 físico cambiando solo la IP
 | Movimiento | `move_gohome(...)` | `/xarm/move_gohome` | Home de fábrica (articular) |
 | Estado | `hay_error()` | tópico `robot_states` | ¿Hay código de error? |
 | Estado | `servos_ok()` | tópico `robot_states` | ¿Servos habilitados? (bitmask `mt_able`) |
-| Estado | `esperar_listo(timeout)` | tópico `robot_states` | Bloquea hasta READY, sin error, servos ok |
+| Estado | `estado_ok(timeout)` | tópico `robot_states` | Bloquea hasta READY, sin error, servos ok (confirmación) |
+| Estado | `verificar_listo()` | tópico `robot_states` | Precondición: lanza si el brazo no está listo *ahora* |
 | Estado | `get_angulos()` | tópico `robot_states` | Ángulos articulares actuales |
 | Recuperación | `clean_error()` | `/xarm/clean_error` | Limpia el código de error |
+
+**Todos los `request` de Capa 1 castean sus campos al tipo que ROS2 exige** (`float()` en
+poses/ángulos/velocidades, `int()` en los de arranque) antes de enviarlos. Un `int` donde
+el mensaje espera un `float` no dispara una excepción de Python sino un *assert* de C que
+aborta el proceso (`core dumped`); el casteo defensivo en el punto donde se arma el
+mensaje evita ese modo de fallo sin importar quién llame al método.
 
 **Decisión de arquitectura — API nativa sobre MoveIt2.** El control se hace vía los
 servicios `/xarm/*` del driver, no vía MoveIt2. MoveIt2 y Gazebo quedan diferidos como
@@ -80,11 +95,76 @@ coordenadas, no ángulos — de cara al futuro modelo VLA. El articular se reser
 fijas conocidas como el *home*, donde guardar los ángulos evita recalcular IK.
 
 **Lectura de estado.** `FredArm` se suscribe al tópico `/xarm/robot_states` y guarda el
-último mensaje. Sobre él construye verificación: `esperar_listo()` bloquea (haciendo
-`spin_once`) hasta que el brazo esté en READY, sin error y con los servos habilitados. Esto
-convierte cada comando de "manda y reza" a "manda y confirma" — la base de las primitivas
-seguras de alto nivel. `wait=True` en un movimiento solo garantiza que *terminó*;
-`esperar_listo()` garantiza que *terminó bien*.
+último mensaje (`_last_state`). Sobre él construye **dos verificaciones con propósitos
+distintos**, que comparten forma pero no intención:
+
+- `estado_ok(timeout)` — **confirmación** (la película). Bloquea haciendo `spin_once` en un
+  bucle hasta que el brazo esté en READY, sin error y con los servos habilitados, o hasta
+  agotar el `timeout`. Devuelve `True`/`False`. Se usa *después* de un movimiento para
+  confirmar que terminó bien. Convierte cada comando de "manda y reza" a "manda y confirma":
+  `wait=True` solo garantiza que el movimiento *terminó*; `estado_ok()` garantiza que
+  *terminó bien*.
+- `verificar_listo()` — **precondición** (la foto). Hace un solo `spin_once` para refrescar
+  el estado y lanza `FredArmError` si el brazo no está listo *en este instante* (sin
+  comunicación, en error, o no-READY). Se usa *antes* de mover, para no mandar un comando a
+  un brazo que no fue arrancado con `preparar()`.
+
+`_last_state` arranca en `None` y solo se llena cuando algo hace `spin`; por eso ambas
+verificaciones spinean antes de leerlo, y `verificar_listo()` distingue explícitamente el
+caso `None` (sin comunicación / falta `preparar()`) del caso "hay estado pero no es READY".
+
+### Primitivas de alto nivel — Capa 3
+
+Las primitivas son verbos de alto nivel que envuelven la Capa 1 con verificación
+integrada. Están pensadas para ser lo que el LLM genera: se leen como recetas y son seguras
+por construcción. Todas siguen el **mismo patrón**:
+
+```
+validar argumentos → verificar_listo() → ejecutar servicio Capa 1
+                   → comprobar ret → confirmar con estado_ok()
+```
+
+Ninguna devuelve un valor de éxito: **si la primitiva no lanzó, salió bien** (la ausencia
+de excepción es la señal de éxito).
+
+| Primitiva | Envuelve | Función |
+|---|---|---|
+| `preparar(...)` | arranque completo | `motion_enable → set_mode → set_state` y confirma READY |
+| `recuperar()` | `clean_error` + `preparar` | Saca al brazo de un error y lo re-arranca |
+| `mover_a(x, y, z, roll, pitch, yaw, ...)` | `set_position` | Movimiento cartesiano; coordenadas nombradas, orientación por defecto "efector hacia abajo" |
+| `mover_servos_a(angulos, num_joints=6, ...)` | `set_servo_angle` | Movimiento articular; valida cantidad y tipo de ángulos |
+| `home()` | `move_gohome` | Regresa al home de fábrica |
+
+**Frontera de validación.** La Capa 3 es la membrana entre el código no confiable que
+genera el LLM y la Capa 1. Cada primitiva **valida sus argumentos** (tipos, cantidad,
+positividad) y lanza `FredArmError` con un mensaje accionable antes de tocar el brazo. La
+validación es permisiva con la forma del número (acepta `int` y `float`); el casteo al tipo
+exacto de ROS2 ocurre después, en la Capa 1. La *alcanzabilidad física* de una pose no se
+valida en Python: el firmware es el validador autoritativo de cinemática, y su fallo se
+captura vía el `ret` del servicio.
+
+### Manejo de errores — `FredArmError`
+
+Toda condición anómala se comunica lanzando `FredArmError` (clase propia en
+`fred_arm_error.py`). El sistema **falla ruidoso y se detiene**: nada de reintentos
+silenciosos ni de devolver `False` que el código generado podría ignorar. El mensaje de
+cada excepción es descriptivo y accionable, pensado como *feedback* para que el LLM corrija
+su código.
+
+Separar responsabilidades por capa:
+
+- **Capa 1** devuelve el `ret` crudo del driver (`0` = éxito), fiel a la convención del
+  SDK. No interpreta ni lanza.
+- **Capa 3** traduce: `ret != 0`, estado no-READY tras el movimiento, o argumentos
+  inválidos → `FredArmError`.
+- El **orquestador** (futuro) envolverá la ejecución del código del LLM en un `try/except
+  FredArmError`, capturará el mensaje y lo devolverá al LLM como feedback. La primitiva
+  *lanza*; el orquestador *atrapa y traduce*. La primitiva no sabe nada del LLM.
+
+Una excepción hereda dos niveles de detección: por ejemplo `recuperar()` distingue un fallo
+de comunicación (`clean_error` con `ret != 0`) de un fallo de efecto (el brazo no vuelve a
+READY, detectado por el `estado_ok()` dentro de `preparar()`), cada uno con su propio
+mensaje.
 
 ---
 
@@ -171,8 +251,20 @@ source /root/xarm_ws/install/setup.bash
 ros2 run fred_lang_driver fred_arm
 ```
 
-El `main()` de ejemplo ejecuta la secuencia de arranque
-(`motion_enable → set_mode → set_state`) y movimientos de prueba con verificación de estado.
+El `main()` de ejemplo ejecuta la secuencia de arranque y movimientos de prueba con
+verificación de estado. El flujo recomendado usa las primitivas de Capa 3 dentro de un
+`try/except FredArmError`:
+
+```python
+arm = FredArm()
+try:
+    arm.preparar()
+    arm.mover_a(x=206, y=0, z=150.5)   # cartesiano, efector hacia abajo
+    arm.home()
+except FredArmError as e:
+    arm.get_logger().error(f'Fallo: {e}')
+    # aquí el orquestador llamaría arm.recuperar() y reintentaría
+```
 
 ---
 
@@ -187,15 +279,21 @@ El `main()` de ejemplo ejecuta la secuencia de arranque
 | **Capa 1 — control de bajo nivel** | ✅ **Completa y probada** |
 | ↳ Arranque (`motion_enable`, `set_mode`, `set_state`) | ✅ Validado |
 | ↳ Movimiento (`set_position`, `set_servo_angle`, `move_gohome`) | ✅ Validado — el brazo se mueve |
-| ↳ Lectura de estado (suscripción + `esperar_listo`, `hay_error`, `servos_ok`, `get_angulos`) | ✅ Validado |
+| ↳ Lectura de estado (suscripción + `estado_ok`, `verificar_listo`, `hay_error`, `servos_ok`, `get_angulos`) | ✅ Validado |
 | ↳ Recuperación (`clean_error`) | ✅ Validado |
-| Capa 3 — primitivas de alto nivel (`home`, `mover_a`, …) | 🚧 Siguiente |
+| ↳ Casteo defensivo de tipos en todos los `request` | ✅ Implementado |
+| **Capa 3 — primitivas de alto nivel** | ✅ **Completa** |
+| ↳ `preparar`, `recuperar` (arranque + recuperación) | ✅ Validado |
+| ↳ `mover_a` (cartesiano), `mover_servos_a` (articular), `home` | ✅ Implementado |
+| ↳ Manejo de errores por `FredArmError` + `verificar_listo` | ✅ Implementado |
 | Pinza / gripper | ⏳ Pendiente de hardware (el sim no expone actuador) |
-| Integración con LLM | ⏳ Planeado |
+| Nodo orquestador + integración con LLM | ⏳ Planeado |
 
-Todos los métodos están verificados objetivamente contra el simulador: los movimientos
-cambian la pose/ángulos según lo comandado (`ret=0`, `err=0`), y `esperar_listo()` confirma
-el estado READY tras cada uno leyendo `/xarm/robot_states`.
+Los métodos de Capa 1 están verificados objetivamente contra el simulador: los movimientos
+cambian la pose/ángulos según lo comandado (`ret=0`, `err=0`), y `estado_ok()` confirma el
+estado READY tras cada uno leyendo `/xarm/robot_states`. La recuperación de errores de
+planificación (`err=21`) está confirmada experimentalmente (ver
+[Nota de ingeniería](#nota-de-ingeniería--recuperación-de-errores)).
 
 ---
 
@@ -212,9 +310,36 @@ diagnosticada:
 - El SDK **Python 1.18.4** no depende de ese ACK, por eso ahí devuelve `ret=0`.
 
 **Verificación de que los servos sí se habilitan:** tras `motion_enable`, el tópico
-`/xarm/robot_states` reporta `mt_able = 255` (máscara de servos activos) y `err = 0`. Por
-eso `FredArm` no aborta ante `ret=3`; confirma el estado con `esperar_listo()` /
-`servos_ok()` en su lugar.
+`/xarm/robot_states` reporta `mt_able = 63` (`0b111111` — los 6 servos del xArm6 activos) y
+`err = 0`. Por eso `FredArm` no aborta ante `ret=3`; confirma el estado con `estado_ok()` /
+`servos_ok()` en su lugar. `servos_ok()` compara `mt_able & ((1<<6)-1) == 63`.
+
+---
+
+## Nota de ingeniería — recuperación de errores
+
+Una pose inalcanzable se manifiesta de dos formas distintas según el estado previo del
+brazo, ambas confirmadas experimentalmente contra el simulador:
+
+- **Brazo limpio → pose imposible:** el servicio devuelve un `ret` negativo (p. ej. `-9`),
+  `err` queda en `0` y el brazo queda en `state=1` (RUNNING "fantasma"). Se recupera con
+  `set_state(0)` + `estado_ok()`.
+- **Brazo ya en error → pose imposible:** el servicio devuelve `ret=1` y el brazo entra en
+  `state=4` (STOPPED) con `err=21` (familia planificación/cinemática, recuperable por
+  software).
+
+**La secuencia de recuperación que funciona es `clean_error()` seguido del arranque
+completo** (`motion_enable → set_mode → set_state → estado_ok`), que es exactamente lo que
+hace la primitiva `recuperar()`. Hallazgo importante: `clean_error()` **por sí solo no
+baja el `err=21`** en este firmware (devuelve `ret=0` sin limpiar, ni con espera de por
+medio); hace falta el re-arranque completo. La confirmación real del éxito viene siempre de
+`estado_ok()` leyendo el estado, no del `ret` de `clean_error()`.
+
+> **Trampa de las dos tablas.** UFACTORY tiene *dos* tablas de códigos con números
+> pequeños que se confunden con facilidad: los **códigos de retorno de la API** (los `ret`
+> de las funciones — ahí `21` es "modbus baudrate not supported") y los **códigos de error
+> del controlador** (el campo `err` de `/xarm/robot_states` — ahí `21` es de planificación
+> /cinemática). El `err=21` que ve `FredArm` es el segundo. No confundir `ret` con `err`.
 
 ---
 
@@ -265,6 +390,8 @@ ros2 launch xarm_moveit_config xarm6_moveit_fake.launch.py
 | El callback de una suscripción nunca se dispara | QoS del suscriptor no coincide con el del publisher | Verificar con `ros2 topic info <topic> --verbose`; igualar Reliability/Durability. (`robot_states` es RELIABLE+VOLATILE = default, basta profundidad 10) |
 | El driver cuelga en `connect()` y no anuncia servicios | `uf_software` quedó en red `bridge` (`docker start` reusa la config previa) | Recrear con `docker run --network host` (lo hace `run_uf_studio.sh`) |
 | Movimiento cartesiano falla con error C40 | Con `motion_type=0` (lineal), la pose objetivo no es alcanzable en línea recta o no tiene IK válida | Usar poses alcanzables cercanas, o considerar `motion_type` 1/2 (requiere firmware >= 1.11.100) |
+| El brazo queda en `err=21` / `state=4` tras una pose imposible y no vuelve a moverse | Error de planificación/cinemática; `clean_error()` solo no lo limpia en este firmware | Llamar `recuperar()` (= `clean_error` + arranque completo) y confirmar con `estado_ok()`. Un script nuevo hereda el estado sucio: reiniciar el contenedor del sim para partir limpio |
+| El programa muere con `Aborted (core dumped)` en un movimiento | Se pasó un `int` (u otro tipo) donde el mensaje ROS2 espera `float`; el generador de mensajes hace un *assert* de C | Usar las primitivas de Capa 3 (validan y castean) o pasar `float` explícito a los métodos de Capa 1. La Capa 1 ya castea sus `request`, pero una versión previa podría no hacerlo |
 | `docker: unknown command: docker compose` | El plugin de compose no está instalado | No es necesario — usar `docker build` / `docker run` directo |
 | `E: Unable to locate package ...` durante `rosdep install` en el Dockerfile | Cada `RUN` es una capa aislada; un `apt-get update` previo no persiste | Poner `apt-get update` en el mismo `RUN` que el install que lo necesita |
 | `Failed to find ... xarm_gazebo/package.sh` al compilar `xarm_moveit_config` | Se omitió `xarm_gazebo` con `--packages-skip`, pero `xarm_moveit_config` depende de él | Compilar `xarm_gazebo` siempre (no requiere GPU para compilar) |
@@ -276,7 +403,8 @@ ros2 launch xarm_moveit_config xarm6_moveit_fake.launch.py
 ## Roadmap
 
 - [x] Métodos base de `FredArm` (Capa 1): arranque, movimiento, lectura de estado, recuperación
-- [ ] Capa 3 — primitivas de alto nivel (`home()`, `mover_a()`, `mover_juntas()`, …) que envuelven la Capa 1 con verificación integrada
+- [x] Casteo defensivo de tipos en todos los `request` de Capa 1
+- [x] Capa 3 — primitivas de alto nivel (`preparar`, `recuperar`, `mover_a`, `mover_servos_a`, `home`) con verificación integrada y manejo de errores por `FredArmError`
 - [ ] Pinza / gripper (pendiente de levantar el firmware con actuador; los servicios de gripper Lite6 usan el tipo `Call`)
 - [ ] Nodo orquestador + integración LLM (Code as Policies vía `exec()`)
 - [ ] Prueba end-to-end: comando en lenguaje natural → código Python → ejecución validada

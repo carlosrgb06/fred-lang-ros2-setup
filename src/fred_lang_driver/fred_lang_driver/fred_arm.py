@@ -1,5 +1,7 @@
 import rclpy
+import math
 from rclpy.node import Node
+from .fred_arm_error import FredArmError
 from xarm_msgs.srv import SetInt16ById, SetInt16, MoveJoint, MoveCartesian, MoveHome, Call
 from xarm_msgs.msg import RobotMsg
 
@@ -23,10 +25,16 @@ class FredArm(Node):
         self.clean_error_client = self._make_client(Call, '/xarm/clean_error')
         self.move_gohome_client = self._make_client(MoveHome, '/xarm/move_gohome')
 
-        self._last_state = None
+        self._last_state = None # Es None cuando no se ha leido el topico
         self.robot_states_sub = self.create_subscription(RobotMsg, '/xarm/robot_states', self._robot_states_cb,10)
 
  # Helpers
+    def resumen_estado(self):
+        s = self._last_state
+        if s is None:
+            return 'sin estado (nunca se leyo /xarm/robot_states)'
+        return f'state={s.state}, err={s.err}, servos_ok={self.servos_ok()}'
+    
     def hay_error(self):
         """Verifica si el brazo reporta algun error a traves del campo err en /xarm/robot_states"""
 
@@ -48,7 +56,7 @@ class FredArm(Node):
         mascara = (1 << num_joints) -1   # 6 juntas -> 0b111111 = 63
         return (self._last_state.mt_able & mascara) == mascara
 
-    def esperar_listo(self, timeout = 10.0):
+    def estado_ok(self, timeout = 10.0):
         """Bloquea hasta que el brazo este listo para continuar. err=0 y todos los servos habilitados por servos_ok().
         
         Args:
@@ -77,8 +85,24 @@ class FredArm(Node):
         if self._last_state is None:
             return None
         return list(self._last_state.angle)
-    
- # Clientes se servicios directos 
+
+    def verificar_listo(self):
+        """Verifica que el brazo este listo para moverse checando si no hay errores, si el state del brazo es 2 o si no se corrio la secuencia de arranque encapsulada en preparar()
+        
+        Raises:
+            FredArmError: Si no se corrio la funcion preparar() previo a esta
+            FredArmError: Si el brazo tiene un error
+            FredArmError: Si el brazo no esta en READY/SLEEPING (state=2)
+        """
+        rclpy.spin_once(self, timeout_sec=0.2)
+        if self._last_state is None:
+            raise FredArmError('sin estado del brazo. ¿Corriste preparar()?, _last_state = none')
+        if self.hay_error():
+            raise FredArmError(f'el brazo esta en error: {self.resumen_estado()}')
+        if self._last_state.state != 2:
+            raise FredArmError(f'el brazo no esta READY: {self.resumen_estado()}')
+        
+ # Clientes de servicios directos (Capa 1)
 
     def _make_client(self, srv_type, srv_name):
         """Crea un cliente de servicio y espera a que esté disponible.
@@ -115,8 +139,8 @@ class FredArm(Node):
                 habilitan; verificar mt_able en /xarm/robot_states.
         """
         request = SetInt16ById.Request()
-        request.id = id
-        request.data = enable
+        request.id = int(id)
+        request.data = int(enable)
         future = self.motion_enable_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -150,7 +174,7 @@ class FredArm(Node):
             #	2 for TEACHING_JOINT mode. (Gravity compensated mode, easy for teaching)
         """
         request = SetInt16.Request()
-        request.data = mode
+        request.data = int(mode)
         future = self.set_mode_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -184,7 +208,7 @@ class FredArm(Node):
             #	5: CONFIG_CHANGED, system configuration or mode changed, not ready for motion commands.
         """
         request = SetInt16.Request()
-        request.data = state
+        request.data = int(state)
         future = self.set_state_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -209,10 +233,10 @@ class FredArm(Node):
             int: ret del driver. 0 = éxito.
         """
         request = MoveJoint.Request()
-        request.angles = angles
-        request.speed = speed
-        request.acc = acc
-        request.wait = wait
+        request.angles = [float(v) for v in angles]
+        request.speed = float(speed)
+        request.acc = float(acc)
+        request.wait = bool(wait)
         future = self.set_servo_angle_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -240,10 +264,10 @@ class FredArm(Node):
             int: ret del driver. 0 = éxito.
         """
         request = MoveCartesian.Request()
-        request.pose = pose
-        request.speed = speed
-        request.acc = acc
-        request.wait = wait
+        request.pose = [float (v) for v in pose]
+        request.speed = float(speed)
+        request.acc = float(acc)
+        request.wait = bool(wait)
         future = self.set_position_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -277,9 +301,9 @@ class FredArm(Node):
             int: ret del driver. 0 = éxito.
         """
         request = MoveHome.Request()
-        request.speed = speed
-        request.acc = acc
-        request.wait = wait
+        request.speed = float(speed)
+        request.acc = float(acc)
+        request.wait = bool(wait)
         future = self.move_gohome_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         response = future.result()
@@ -288,8 +312,154 @@ class FredArm(Node):
 
  # Callbacks 
     def _robot_states_cb(self,msg):
+
         self._last_state = msg
 
+ # Funciones de alto nivel (Capa 3)
+
+    def preparar(self, enable=1, id=8, mode=0, state=0):
+        """Secuencia de arranque del brazo
+
+        Args:
+            enable (int): 1 = habilitar, 0 = deshabilitar. default(enable=1)
+            id (int): servo objetivo. 1-7 para un eje individual,
+                8 = todos los ejes a la vez (default).
+
+            mode (int): modo de control.
+                0 = posición, control punto a punto (default). Para
+                    set_position / set_servo_angle. <- usar este en el flujo actual.
+                1 = servoj, planificador de trayectoria externo (MoveIt/ros-controllers).
+                2 = manual / Free-Drive (gravedad cero).
+                3 = reservado.
+                4 = control de velocidad articular.
+                5 = control de velocidad cartesiana.
+                6 = planificación dinámica online en espacio articular (firmware >= v1.10.0).
+                7 = planificación dinámica online en espacio cartesiano (firmware >= v1.11.0).
+
+            state (int): estado a fijar (OJO: los valores que se FIJAN no son
+                los mismos que se LEEN en /xarm/robot_states).
+                0 = STANDBY: pone el brazo listo en el modo actual y limpia
+                    errores. El feedback pasará a 2 (READY) automáticamente.
+                3 = PAUSED: pausa la ejecución; se reanuda con set_state(0).
+                4 = STOP: termina toda ejecución de inmediato; no acepta
+                    comandos nuevos hasta volver a STANDBY (0).
+            
+            Nota: los estados LEÍDOS en /xarm/robot_states usan otra tabla:
+            # state of robot:
+            #	1: RUNNING, executing motion command.
+            #	2: SLEEPING, not in execution, but ready to move.
+            #	3: PAUSED, paused in the middle of unfinished motion.
+            #	4: STOPPED, not ready for any motion commands.
+            #	5: CONFIG_CHANGED, system configuration or mode changed, not ready for motion commands.
+
+        Returns:
+            None. Si el arranque tiene exito, retorna sin mas; la ausencia de
+            excepcion ES la señal de exito.
+
+        Raises:
+            FredArmError: si motion_enable, set_mode o set_state devuelven un ret
+            invalido, o si el brazo no llega a READY tras el arranque.
+        """
+        if enable not in (0, 1):
+            raise FredArmError(f'preparar() espera enable 0 o 1, recibio {enable!r}')
+        ret = self.motion_enable(enable, id)
+        #REVISAR EN HARDWARE REAL
+        if ret != 0 and ret != 3: # ret=3 es un "timeout cosmético" contra el firmware sim, pero los servos SÍ se habilitan; verificar mt_able en /xarm/robot_states.
+            raise FredArmError(f'motion_enable fallo con ret={ret}')
+        ret = self.set_mode(mode)
+        if ret != 0:
+            raise FredArmError(f'set_mode fallo con ret={ret}')
+        ret = self.set_state(state)
+        if ret != 0:
+            raise FredArmError(f'set_state fallo con ret={ret}')
+        if not self.estado_ok():
+            raise FredArmError(f'preparar() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')
+
+    def recuperar(self):
+        """Funcion que recupera el brazo de un estado de error: limpia el errory re-ejecuta el arranque completo.
+        
+        Returns:
+            None. Si la recuperación tiene exito, retorna sin mas; la ausencia de
+            excepcion ES la señal de exito.
+        Raises:
+            FredArmError: si clean_error no devuelve un ret = 0
+            
+            FredArmError: si motion_enable, set_mode o set_state devuelven un ret
+            invalido, o si el brazo no llega a READY tras el arranque.
+        """
+        ret = self.clean_error()
+        if ret != 0:
+            raise FredArmError(f'clean_error -> ret={ret}')
+        self.preparar()
+
+    def mover_a(self, x,y,z, roll=math.pi, pitch=0.0 ,yaw= 0.0,speed=200.0 ,acc=2000.0):
+        """Funcion que encapsula el servicio de set_position en una primitiva de alto nivel
+        
+        Args:
+            x(float o int) = posicion deseada en el eje x en mm (milimetros)
+            y(float o int) = posicion deseada en el eje y en mm (milimetros)
+            z(float o int) = posicion deseada en el eje z en mm (milimetros)
+            roll(float o int) = orientacion deseada en el eje x en radianes default: roll = math.pi
+            pitch(float o int) = orientacion deseada en el eje y en radianes default: pitch = 0
+            yaw(float o int) = orientacion deseada en el eje z en radianes default: yaw = 0
+
+            Los valores defaults para roll,pitch y yaw hacen que la orientacion predeterminada sea con el actuador viendo hacia abajo
+
+            speed (float o int, positivos): velocidad lineal máxima del TCP, en mm/s (default 200.0).
+            acc (float o int, positivos): aceleración lineal máxima del TCP, en mm/s² (default 2000.0).
+        
+        
+        Returns:
+            None. Si el movimiento tiene exito, retorna sin mas; la ausencia de
+            excepcion ES la señal de exito.
+        
+
+        Raises:
+            FredArmError: Si x,y,z,roll,pitch,yaw no son de tipo int o float
+            FredArmError: Si speed o acc no son de tipo int o float, positivos
+            FredArmError: Si no se corrio la funcion preparar() previo a esta (ver verificar_listo())
+            FredArmError: Si el brazo tiene un error (ver verificar_listo())
+            FredArmError: Si el brazo no esta en READY/SLEEPING (state=2) (ver verificar_listo())
+            FredArmError: Si set_position ret->(!=0) 
+            FredArmError: Si no se regresa a un estado de READY/SLEEPING state=(2) despues del movimiento
+        
+        """
+        for valor in (x, y, z, roll, pitch, yaw):
+            if not isinstance(valor, (int, float)):
+                raise FredArmError(f'mover_a espera numeros, recibio {valor!r} ({type(valor).__name__})')
+        for valor in (speed, acc):
+            if not isinstance(valor, (int, float)):
+                raise FredArmError(f'mover_a: speed/acc deben ser numeros, recibio {valor!r}')
+            if valor <= 0:
+                raise FredArmError(f'mover_a: speed/acc deben ser positivos, recibio {valor}')
+            
+        self.verificar_listo()
+
+        pose = [x,y,z,roll,pitch,yaw]
+        ret = self.set_position(pose,speed,acc,wait=True)
+        if ret != 0:
+            raise FredArmError(f'set_position fallo con ret={ret}')
+        if not self.estado_ok():
+            raise FredArmError(f'mover_a() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')
+
+    def home(self):
+        """Funcion que encapsula el servicio move_gohome. Primitiva de alto nivel en capa 3 que manda al robot a sus coordenadas bases impuestas por el fabricante
+        
+        Raises:
+            FredArmError: Si no se corrio la funcion preparar() previo a esta (ver verificar_listo())
+            FredArmError: Si el brazo tiene un error (ver verificar_listo())
+            FredArmError: Si el brazo no esta en READY/SLEEPING (state=2) (ver verificar_listo())
+            FredArmError: Si move_gohome ret->(!=0) 
+            FredArmError: Si no se regresa a un estado de READY/SLEEPING state=(2) despues del movimiento
+        """
+        self.verificar_listo()
+        ret = self.move_gohome()
+        if ret !=0:
+            raise FredArmError(f'move_gohome fallo con ret={ret}')
+        if not self.estado_ok():
+            raise FredArmError(f'home() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')  
+
+           
 def main():
     rclpy.init()
     node = FredArm()
@@ -299,7 +469,7 @@ def main():
     node.set_mode(0)
     node.set_state(0)
 
-    if not node.esperar_listo():
+    if not node.estado_ok():
         node.get_logger().error('El brazo no llegó a estado listo. Abortando.')
         node.destroy_node()
         rclpy.shutdown()
@@ -313,13 +483,13 @@ def main():
     # --- set_position: mover a una pose para salir de home ---
     node.get_logger().info('Moviendo a una pose de prueba...')
     node.set_position([206.0, 0.0, 150.5, 3.1416, 0.0, 0.0])
-    node.esperar_listo()
+    node.estado_ok()
     node.get_logger().info(f'Ángulos tras mover: {node.get_angulos()}')
 
     # --- move_gohome: regresar a home de fábrica ---
     node.get_logger().info('Regresando a home...')
     node.move_gohome()
-    node.esperar_listo()
+    node.estado_ok()
     node.get_logger().info(f'Ángulos en home: {node.get_angulos()}')
 
     # --- clean_error: probar que responde ret=0 (no hay error, pero valida el servicio) ---

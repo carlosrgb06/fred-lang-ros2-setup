@@ -506,42 +506,40 @@ class FredArm(Node):
            
 def main():
     rclpy.init()
-    node = FredArm()
+    arm = FredArm()
+    try:
+        # 1. preparar() — arranque completo, deja el brazo en READY
+        arm.get_logger().info('=== preparar() ===')
+        arm.preparar()
+        arm.get_logger().info(f'Ángulos tras preparar: {arm.get_angulos()}')
 
-    # --- Secuencia de arranque ---
-    node.motion_enable(1, 8)
-    node.set_mode(0)
-    node.set_state(0)
+        # 2. mover_servos_a() — movimiento articular a una postura conocida (cerca de home)
+        arm.get_logger().info('=== mover_servos_a() ===')
+        arm.mover_servos_a([0.0, -0.2, 0.0, 0.2, 0.0, 0.0])
+        arm.get_logger().info(f'Ángulos tras mover_servos_a: {arm.get_angulos()}')
 
-    if not node.estado_ok():
-        node.get_logger().error('El brazo no llegó a estado listo. Abortando.')
-        node.destroy_node()
+        # 3. mover_a() — movimiento cartesiano (efector hacia abajo por defecto)
+        arm.get_logger().info('=== mover_a() ===')
+        arm.mover_a(x=206, y=0, z=150.5)
+        arm.get_logger().info(f'Ángulos tras mover_a: {arm.get_angulos()}')
+
+        # 4. home() — regreso al home de fábrica
+        arm.get_logger().info('=== home() ===')
+        arm.home()
+        arm.get_logger().info(f'Ángulos tras home: {arm.get_angulos()}')
+
+        # 5. recuperar() sobre brazo sano — prueba de idempotencia (no hay error que limpiar)
+        arm.get_logger().info('=== recuperar() (brazo sano) ===')
+        arm.recuperar()
+        arm.get_logger().info(f'Ángulos tras recuperar: {arm.get_angulos()}')
+
+        arm.get_logger().info('=== Todas las primitivas de Capa 3 funcionaron ===')
+
+    except FredArmError as e:
+        arm.get_logger().error(f'Una primitiva falló: {e}')
+    finally:
+        arm.destroy_node()
         rclpy.shutdown()
-        return
-
-    node.get_logger().info('Brazo listo.')
-
-    # --- get_angulos: leer estado inicial ---
-    node.get_logger().info(f'Ángulos iniciales: {node.get_angulos()}')
-
-    # --- set_position: mover a una pose para salir de home ---
-    node.get_logger().info('Moviendo a una pose de prueba...')
-    node.set_position([206.0, 0.0, 150.5, 3.1416, 0.0, 0.0])
-    node.estado_ok()
-    node.get_logger().info(f'Ángulos tras mover: {node.get_angulos()}')
-
-    # --- move_gohome: regresar a home de fábrica ---
-    node.get_logger().info('Regresando a home...')
-    node.move_gohome()
-    node.estado_ok()
-    node.get_logger().info(f'Ángulos en home: {node.get_angulos()}')
-
-    # --- clean_error: probar que responde ret=0 (no hay error, pero valida el servicio) ---
-    node.clean_error()
-
-    node.get_logger().info('Prueba completada.')
-    node.destroy_node()
-    rclpy.shutdown()
 
 
 if __name__ == '__main__':

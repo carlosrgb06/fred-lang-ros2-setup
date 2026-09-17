@@ -1061,19 +1061,16 @@ A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos list
 
 - **Códigos de la API y de error del controlador** (la doc que distingue las dos tablas de
   códigos `ret` vs `err`) — docs de UFACTORY ·
-  https://docs.api.ufactory.cc
+  https://github.com/xArm-Developer/xArm-CPLUS-SDK.git
 - **Manual de usuario del xArm** (máquina de modos/estados, códigos de error del control
-  box) · <verificar URL>
-- **Guía de instalación de UFACTORY Studio en Docker** ·
-  docs.ufactory.cc/support_articles/software/
+  box) · https://github.com/xArm-Developer/xarm_ros2.git
+- **Guía de instalación de UFACTORY Studio en Docker** · https://docs.supportarticle.ufactory.cc/support_articles/software/how-to-install-ufactory-studio-in-docker.html
 
 ### 8.3 Documentación de ROS2
 
-- **ROS2 Jazzy Jalisco — documentación oficial** · <verificar URL: https://docs.ros.org/en/jazzy/>
+- **ROS2 Jazzy Jalisco — documentación oficial** · https://docs.ros.org/en/jazzy/
 - **`rclpy`** (cliente de Python: nodos, servicios, `spin_once`,
-  `spin_until_future_complete`) · <verificar URL: https://docs.ros.org/en/jazzy/ — sección rclpy>
-- **Conceptos de QoS** (relevante para el ajuste de la suscripción a `/xarm/robot_states`) ·
-  <verificar URL>
+  `spin_until_future_complete`) · https://docs.ros.org/en/jazzy/
 
 ### 8.4 Herramientas de exploración usadas en el desarrollo
 

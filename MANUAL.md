@@ -1002,10 +1002,84 @@ Este último ejemplo ilustra una misión completa de pick-and-place utilizando f
 
 ## 7. Trabajo futuro
 
-<!-- PENDIENTE -->
+Mientras que la librería `FredArm` ya está lista para ser utilizada, siguen habiendo muchas cosas que se pueden trabajar para que la librería sea más extensa, firme y adecuada para la tarea titánica que pretende hacer: servir como fuente de información para la creación de un modelo VLA. Lo que se logró concretamente fue adaptar una API de ROS2 para el xArm de UFACTORY, de modo que le facilitara al LLM la traducción de lenguaje natural a código de Python. Esto, consecuentemente, exigió entender a profundidad cómo funciona la API y permitió construir todo un sistema de seguridad detrás de la librería creada, que a su vez tiene posibilidad de expansión. Lo cual refleja que este proyecto se tomó de manera seria, con la visión de que algún día realmente se desarrolle el VLA y no quede en palabras vacías.
+
+### 7.1 El nodo orquestador y la integración con el LLM
+
+El siguiente gran paso para seguir construyendo este sistema sería construir lo que llamaremos orquestador; este será lo que cierra el pipeline de Code as Policies. Recibe el comando en lenguaje natural y se lo pasa directamente al LLM, después recibe el código de Python generado por el LLM a partir del comando en lenguaje natural, lo ejecuta con `exec()` y captura cualquier error arrojado por `FredArmError` para utilizarlo como feedback al LLM, de manera que este pueda corregir el código de ser necesario. Se decidió tener un solo `FredArm` "vivo" durante toda la sesión, de esa manera no tenemos que repetir el arranque, y se mantiene una red de seguridad con `try/except` de `FredArmError` alrededor del `exec()`. Queda como decisión pendiente dónde vive la llamada a `recuperar()` para regresar de un estado de error: si el orquestador la ejecuta automáticamente al capturar el error, o si se deja como parte del código que genera el LLM. Cuando este orquestador esté completo, el sistema FrED-LANG estará completo.
+
+### 7.2 Pinza / gripper
+
+El simulador utilizado actualmente no incluye el gripper del xArm, por lo tanto no se exponen los servicios para utilizar el gripper mediante la API. Se está investigando cómo incluir este gripper para posteriormente agregar las primitivas de Capa 3 `agarrar()` y `soltar()`. Implementar estas primitivas será trivial gracias a información ya encontrada: los servicios del gripper del modelo Lite6 que cierran y abren el gripper usan el tipo de mensaje `Call`, que tiene un `request` vacío. Esto hace que esos servicios tengan el mismo molde que el servicio de Capa 1 `clean_error()`, así que envolverlos en primitivas de Capa 3 con verificación no implicará más trabajo del que ya se desarrolló para las demás primitivas.
+
+### 7.3 Migración a hardware real
+
+Aunque se diseñó el sistema entero para poder tener una portabilidad 1:1 entre el brazo simulado y el brazo real en el laboratorio, no se ha probado realmente en el hardware real. Esto deja al proyecto con la tarea de probar todo esto en un entorno físico real. Ya se prepararon protocolos y posibles situaciones que ocurran cuando se pruebe por primera vez. Se creó una checklist:
+
+1. Confirmar la IP del controlador y configurar IP estática en el host.
+2. Localizar el paro de emergencia.
+3. Leer la versión del firmware real y compararla con la del simulador (v2.4.0) y su compatibilidad con el SDK de C++.
+4. Primer movimiento con velocidades y cambios de posición mínimos, sin comprometer al robot o al operador.
+5. Confirmar si el `ret=3` del servicio `motion_enable` ocurre solamente en la simulación o si tiene un efecto en el brazo real.
+6. Configurar TCP/payload si hay herramienta montada.
+7. Siempre priorizar la seguridad física, tanto del operador como del robot.
+
+### 7.4 Infraestructura de planeación avanzada (MoveIt2 y Gazebo)
+
+Las trayectorias que se trabajarán durante esta fase de trabajo son de punto a punto y simples, y la API nativa es suficiente para completar esta tarea. Cuando las tareas exijan una planeación con evasión de obstáculos, se implementará MoveIt2 como capa de planeación de trayectorias. Utilizar Gazebo con físicas reales también queda como una mejora futura. Ninguna de las dos bloquea el progreso en este momento, y se documentará todo el proceso cuando sean implementadas.
+
+### 7.5 El modelo Vision-Language-Action (VLA)
+
+A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos listos para utilizar todo el sistema como generador de datos para el entrenamiento de un modelo VLA end-to-end. Ese es el objetivo final de este proyecto, la fase 2 del proyecto FrED-LANG. Y aunque el VLA es la meta final, el sistema creado no se desechará una vez cumpla su papel de generar esos datos: incluso puede expandirse y separarse como una herramienta individual para facilitar el uso de brazos robóticos.
 
 ---
 
 ## 8. Referencias
 
-<!-- PENDIENTE -->
+<!-- NOTA: confirma las URLs marcadas <verificar URL> antes de publicar.
+     Puse las que se pueden dar con confianza; el resto requiere que
+     pegues el enlace exacto del repo/página que usaste. -->
+
+### 8.1 Repositorios
+
+- **Repositorio del proyecto** — `carlosrgb06/fred-lang-ros2-setup`
+  <verificar URL: https://github.com/carlosrgb06/fred-lang-ros2-setup>
+- **`xarm_ros2`** (submódulo anidado — driver ROS2, mensajes, moveit config de UFACTORY) —
+  xArm-Developer/xarm_ros2 · <verificar URL: https://github.com/xArm-Developer/xarm_ros2>
+- **`xArm-CPLUS-SDK`** (el SDK de C++ que compila `xarm_api`, anidado en
+  `xarm_sdk/cxx`) — xArm-Developer/xArm-CPLUS-SDK ·
+  <verificar URL: https://github.com/xArm-Developer/xArm-CPLUS-SDK>
+- **`xArm-Python-SDK`** (referencia; no se usa en el proyecto, pero útil para contrastar
+  comportamiento) — xArm-Developer/xArm-Python-SDK ·
+  <verificar URL: https://github.com/xArm-Developer/xArm-Python-SDK>
+- **Imagen del firmware simulado** — `danielwang123321/uf-ubuntu-docker` (Docker Hub) ·
+  <verificar URL>
+
+### 8.2 Documentación de UFACTORY
+
+- **Códigos de la API y de error del controlador** (la doc que distingue las dos tablas de
+  códigos `ret` vs `err`) — docs de UFACTORY ·
+  <verificar URL: https://docs.api.ufactory.cc>
+- **Manual de usuario del xArm** (máquina de modos/estados, códigos de error del control
+  box) · <verificar URL>
+- **Guía de instalación de UFACTORY Studio en Docker** ·
+  <verificar URL: docs.ufactory.cc/support_articles/software/...>
+
+### 8.3 Documentación de ROS2
+
+- **ROS2 Jazzy Jalisco — documentación oficial** · <verificar URL: https://docs.ros.org/en/jazzy/>
+- **`rclpy`** (cliente de Python: nodos, servicios, `spin_once`,
+  `spin_until_future_complete`) · <verificar URL: https://docs.ros.org/en/jazzy/ — sección rclpy>
+- **Conceptos de QoS** (relevante para el ajuste de la suscripción a `/xarm/robot_states`) ·
+  <verificar URL>
+
+### 8.4 Herramientas de exploración usadas en el desarrollo
+
+Además de la documentación escrita, buena parte del conocimiento se obtuvo inspeccionando el
+sistema en vivo. Comandos clave (documentados también en el README):
+
+- `ros2 interface show <tipo>` — definición de servicios y mensajes (`MoveCartesian`,
+  `MoveJoint`, `RobotMsg`).
+- `ros2 service list` / `ros2 topic echo /xarm/robot_states --once` — inspección de servicios
+  y estado en vivo.
+- `help(obj.metodo)` y `dir(obj)` en Python — exploración de la API sin conexión a internet.

@@ -821,29 +821,13 @@ del `ret`.
 
 ---
 
-<!-- ============================================================
-     ANDAMIAJE SECCIÓN 6 — Guía de uso
-     Instrucciones: rellena los bloques [TU PROSA: ...] con tu texto.
-     El código ya está listo (copiar y correr). Cuando termines,
-     pásamelo y lo integro al MANUAL con tu voz.
-     ============================================================ -->
-
 ## 6. Guía de uso — ejemplos
 
-[TU PROSA: 1–2 párrafos de introducción a la sección. Qué encontrará el lector aquí
-(ejemplos de menos a más complejos), y el recordatorio de que todos asumen los tres
-contextos corriendo — firmware sim, driver xarm_api y el nodo — como se explicó en la
-sección 3.4. Menciona que todos los ejemplos son ejecutables completos.]
+Dentro de este apartado del manual se mostrarán ejemplos para familiarizar al lector con cómo se utiliza la librería. Dentro de estos ejemplos encontrará códigos completos para ejecutar ciertas misiones mientras se explica cómo y por qué funcionan estos programas; son ejecutables completos. Todo esto asumiendo que ya se tiene el entorno listo, los dos contenedores (`uf_software` y `fred-lang-jazzy`) corriendo y con `. xarm_scripts/xarm_start.sh {DOFS} {DOFS}` y `ros2 launch xarm_api xarm{numero de DOFS del robot}_driver.launch.py robot_ip:={ip del robot}` (todo esto es explicado a fondo en la sección 3.4).
 
 ### 6.1 El flujo mínimo
 
-[TU PROSA: explica qué hace este ejemplo — el "hola mundo" de la librería. Señala las tres
-piezas del andamiaje que se repetirán en todos los ejemplos: (1) `rclpy.init()` /
-`shutdown()` que abren y cierran el contexto de ROS2, (2) crear el nodo `FredArm()`, y (3)
-el bloque `try / except FredArmError` que captura cualquier fallo de una primitiva. Explica
-por qué `preparar()` va siempre primero: deja el brazo en READY antes de cualquier
-movimiento. Cierra notando que si algo falla, el `except` imprime el mensaje descriptivo del
-error — la base de la interpretabilidad.]
+El código muestra cómo se utiliza la librería `FredArm` con un flujo mínimo. Se importa `rclpy` y la librería `FredArm` y `FredArmError` para poder utilizar todo lo construido dentro de esta librería. Dentro de la función `main()` se inicia `rclpy` con su método `init()`; luego se crea `arm` como objeto de la clase `FredArm`, que a su vez hereda de la clase `Node` de ROS2, esto es crucial por cómo está construido el sistema de FrED-LANG. Este código solamente utiliza primitivas de la Capa 3 de la librería, las más esenciales para provocar un movimiento. Primero `preparar()`, que encapsula todos los servicios de la Capa 1 que hacen que el robot esté disponible para moverse; después se llama a la función `mover_a()` para mover el brazo de una posición de inicio a la seleccionada por las coordenadas que pasan como argumentos de la función; esta función encapsula con barreras de seguridad al servicio `set_position` de la Capa 1. Por último regresamos el brazo a su posición de descanso con la función `home()`, que es a su vez la cápsula del servicio de la Capa 1 `move_gohome`. Todo envuelto con un `try/except` que agarra todos los errores que puede haber lanzado el programa con la librería `FredArmError`, esto con el fin de poder recibir feedback de por qué falló el programa; de esta manera el orquestador corrige al LLM con feedback real. Por último se destruye el nodo con `destroy_node()` y se apaga `rclpy` con su función `shutdown()`.
 
 ```python
 import rclpy
@@ -869,13 +853,12 @@ if __name__ == '__main__':
 
 ### 6.2 Movimiento cartesiano vs. articular
 
-[TU PROSA: recuerda brevemente la diferencia (remite a la sección 4.4): `mover_a` piensa en
-coordenadas del efector (el flujo natural, el que se alinea con el VLA); `mover_servos_a`
-piensa en ángulos de junta (para poses fijas conocidas). Señala que en `mover_a` la
-orientación por defecto deja el efector hacia abajo, así que basta con dar x, y, z. En
-`mover_servos_a`, que los ángulos van en radianes y deben ser tantos como juntas
-(`num_joints=6` para el xArm6). Los ángulos del ejemplo son pequeños y cercanos a home, una
-pose segura para ilustrar.]
+En este ejemplo pondremos en comparación los diferentes tipos de movimientos que podemos crear utilizando la librería `FredArm` y `FredArmError`; solamente hay dos, cartesiano y angular. Para moverse con posiciones cartesianas del efector final (en mm, milímetros) debemos utilizar la misma función de Capa 3 que utilizamos en el ejemplo pasado, `mover_a()`. Este tipo de movimiento nos sirve mucho al utilizar una cámara para determinar los movimientos del brazo, como lo hará el producto final (VLA). Esta función deja el efector final por defecto mirando hacia abajo (`roll=pi, pitch=0.0, yaw=0.0`), por lo que no es necesario mandar especificaciones de esos argumentos si no requerimos mover la dirección del efector final. Luego tenemos el segundo tipo de movimiento: el movimiento angular se utiliza cuando ya tenemos una configuración de ángulos predefinida, de tal manera el robot no necesita hacer el proceso de cinemática inversa (IK) que tiene que hacer cuando se utiliza `mover_a()`. `mover_servos_a()` es la función que encapsula el servicio `set_servo_angle()` en barreras de protección y lo transforma en una función de Capa 3; la función requiere de una lista que contenga tantos ángulos en radianes (`rad`) como DOFS tiene el robot, esto se verifica por seguridad. Esta función también permite alterar el argumento `num_joints` (`default(num_joints=6)`, porque por defecto se utiliza el xArm6), que es el que determina con cuántas juntas estamos trabajando. Dentro de los dos tipos de movimientos, `mover_a()` y `mover_servos_a()`, se puede especificar la velocidad (`speed`) y la aceleración (`acc`) con la que se mueve el robot o las juntas del robot; es necesario entender que las unidades de estos parámetros varían según la función que se utilice. En `mover_a(speed=valor, acc=otro_valor)` se necesita que los valores tengan unidades de mm/s y mm/s² respectivamente, mientras que si se utiliza `mover_servos_a(speed=valor, acc=otro_valor)` los valores deben tener unidades de rad/s y rad/s². Para ambos casos los valores deben ser positivos. Los parámetros completos que aceptan estas funciones son:
+
+- `mover_a(x, y, z, roll=pi, pitch=0.0, yaw=0.0, speed=200.0, acc=2000.0)` — aquí se ilustra la función con valores default.
+- `mover_servos_a(angulos, num_joints=6, speed=0.35, acc=10.0)` — aquí se ilustra la función con valores default.
+
+
 
 ```python
 import rclpy
@@ -907,13 +890,7 @@ if __name__ == '__main__':
 
 ### 6.3 Manejo de errores y recuperación
 
-[TU PROSA: explica el patrón de producción. Cuando una primitiva detecta un fallo, lanza
-`FredArmError` y la ejecución salta al `except` — el brazo puede quedar en un estado sucio
-(ver sección 5.4). `recuperar()` limpia el error y re-arranca el brazo, dejándolo listo para
-reintentar. Señala que este es exactamente el patrón que usará el orquestador con el código
-del LLM: intentar → si falla, capturar el mensaje, recuperar, y (en el futuro) devolver el
-error al LLM para que corrija. Menciona que si `recuperar()` a su vez lanza, el error no era
-recuperable por software y hay que escalar.]
+Cuando utilizamos las funciones que permiten mover el brazo podemos llegar a cometer errores como poses inalcanzables, argumentos mal escritos, etc. Todo esto se trata de atrapar con la clase `FredArmError`; si esta no lo hace, lo hará el mismo firmware del robot. Es importante saber qué es lo que se requiere hacer cuando el brazo queda en un estado de error. Este ejemplo muestra cómo se causa y se recupera de un error. Primero se usa la función `mover_a()` con un argumento de `z` que hace que la posición deseada sea inalcanzable; la primitiva detecta el fallo por el `ret` del servicio (lanzando `FredArmError`) y, como consecuencia, el robot queda en un estado que no es 2 (READY/SLEEPING), por lo que la siguiente función no podrá realizar su objetivo. Para cuando esto suceda se implementó la función de Capa 3 `recuperar()`, que en esencia es simplemente el encapsulamiento de la función de Capa 1 `clean_error()` (que no garantiza limpiar el estado de error del robot) y de la función de Capa 3 `preparar()`. `recuperar()` podría considerarse como un tipo de reinicio para poder regresar a un estado listo para movimiento, y registra el error con `FredArmError` de tal manera que el orquestador podrá corregir al LLM. Si la función `recuperar()` no logró regresar al robot a un estado que permita movimiento, se recomienda reiniciar todo el ambiente simulado. Si no se está utilizando el ambiente simulado, seguir todos los protocolos de seguridad del laboratorio.
 
 ```python
 import rclpy
@@ -945,13 +922,7 @@ if __name__ == '__main__':
 
 ### 6.4 Uso avanzado: bajar a la Capa 1
 
-[TU PROSA: explica que las primitivas cubren el uso normal, pero la Capa 1 sigue expuesta
-para depuración, movimientos especiales o control fino. La advertencia clave: al llamar los
-servicios directos NO se obtiene la verificación automática (validación de argumentos,
-`verificar_listo`, confirmación con `estado_ok`) — el usuario es responsable de comprobar el
-`ret` y el estado por su cuenta. Menciona que aquí se ve el `ret` crudo del driver (0 =
-éxito), y que hay que hacer el arranque a mano (`motion_enable → set_mode → set_state`).
-Recomienda quedarse en Capa 3 salvo que haya una razón concreta para bajar.]
+Mientras que se diseñó la librería con funciones de Capa 3 que encapsulan a las de Capa 1, la Capa 1 sigue expuesta para el LLM y el usuario. Se diseñó la librería para que todo estuviera a la mano y a la vez se facilitara la tarea para el LLM. Usar estas funciones te garantiza un control más fino sobre el robot, pero tienes que haber aprendido bien sobre los argumentos y funcionalidades completas de estos servicios. Cuando se utiliza la Capa 1 no hay verificaciones de seguridad; todo se tiene que verificar apoyándose en funciones de Capa 2, el usuario es responsable al 100% de lo que ocurre y cómo ocurre. Estas funciones de Capa 1 sí tienen un return: es el código que arroja el servicio propio de ROS2. Estos `ret` se pueden interpretar, pero en general el estándar es que salgan con éxito (`ret=0`). Para poner un ejemplo concreto sobre cómo la Capa 3 simplifica a la Capa 1: si se utiliza la Capa 1 para preparar al robot para hacer un movimiento se requieren tres funciones, `motion_enable(enable, id)`, `set_mode(mode)` y `set_state(state)`, y es necesario entender qué hacen todos y cada uno de los parámetros que utilizan estas funciones; mientras que si se utiliza la función `preparar()` de Capa 3, todo este proceso se hace en automático con verificaciones de seguridad que te advierten si el robot no llegó al estado deseado. Si quieres verificar si se llegó al estado deseado sin utilizar la Capa 3, se necesita apoyar de la Capa 2 y utilizar la función `estado_ok()`.
 
 ```python
 import rclpy
@@ -996,6 +967,8 @@ sección 4.5 / trabajo futuro) — la estructura ya contempla su lugar. Cierra n
 este script legible es exactamente lo que sostiene el principio de interpretabilidad: se
 puede auditar qué hará el robot sin leer una sola llamada de bajo nivel. Las coordenadas son
 ilustrativas; ajústalas al workspace real.]
+
+Este ultimo ejemplo ilustra una mision compelta de pick-and-place utilizando funciones de Capa 3 (como normalmente lo hara el LLM), una secuencia de verbos semanticos se programa como una receta. Aqui se utiliza todo el flujo, primero se prepara el brazo con 'preparar' luego se mueve el brazo a una posicion deseada previamente calculada con 'mover_a()', posteriormente se activa el gripper con 'agarrar()' (Funcion que estara proximamente en la libreria); Ya que se tiene el objeto agarrado te mueves con la misma funcion 'mover_a()' y sueltas el objeto donde deseas con 'soltar()' (Funcion que estara proximamente en la libreria), luego regresa el brazo a una posicion de reposo como lo puede ser la posicion de home, utilizando la funcion 'home()'. Cualquier fallo se atrapa por 'FredArmError' y se utiliza como feedback para el usuario, ya sea el LLM o un humano. Para completar todo este proceso es necesario importar las librerias necesarias 'rclpy','FredArm','FredArmError' y no olvidar programar lo basico que se mostro en el ejemplo 1 (seccion 6.1).
 
 ```python
 import rclpy

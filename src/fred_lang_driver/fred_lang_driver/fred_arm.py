@@ -376,7 +376,7 @@ class FredArm(Node):
             raise FredArmError(f'preparar() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')
 
     def recuperar(self):
-        """Funcion que recupera el brazo de un estado de error: limpia el errory re-ejecuta el arranque completo.
+        """Funcion que recupera el brazo de un estado de error: limpia el error re-ejecuta el arranque completo.
         
         Returns:
             None. Si la recuperación tiene exito, retorna sin mas; la ausencia de
@@ -441,6 +441,50 @@ class FredArm(Node):
             raise FredArmError(f'set_position fallo con ret={ret}')
         if not self.estado_ok():
             raise FredArmError(f'mover_a() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')
+
+    def mover_servos_a(self, angulos,num_joints=6,speed=0.35,acc=10.0):
+        """Funcion que encapsula el servicio set_servo_angle en una primitiva de alto nivel
+        Args:
+            num_joints (int): El numero de juntas que tiene el robot default(num_joints=6)
+            angulos (lista): La lista con el angulo deseado para cada junta
+            speed: velocidad en que las juntas se moveran (rad/s) default(speed=0.35)
+            acc: aceleracion en que las juntas se moveran (rad/s^2) default(acc=10)
+        Returns:
+            None. Si el movimiento tiene exito, retorna sin mas; la ausencia de
+            excepcion ES la señal de exito.
+        Raises:
+            FredArmError: Si num_joints no es de tipo int
+            FredArmError: Si angulos no es de tipo list
+            FredArmError: Si angulos no tiene la cantidad de argumentos correspondientes a num_joints
+            FredArmError: Si speed o acc no son de tipo int o float, positivos
+            FredArmError: Si no se corrio la funcion preparar() previo a esta (ver verificar_listo())
+            FredArmError: Si el brazo tiene un error (ver verificar_listo())
+            FredArmError: Si el brazo no esta en READY/SLEEPING (state=2) (ver verificar_listo())
+            FredArmError: Si set_servo_angle ret->(!=0) 
+            FredArmError: Si no se regresa a un estado de READY/SLEEPING state=(2) despues del movimiento
+        """
+        if not isinstance(num_joints,int):
+            raise FredArmError(f'El numero de juntas (num_joints={num_joints}) debe ser entero (int) y coincidente con el modelo de xarm utilizado')
+        if not isinstance(angulos,list):
+            raise FredArmError(f'El argumento (angulos={angulos}) debe ser de tipo lista')
+        if len(angulos) != num_joints:
+            raise FredArmError(f'Los angulos en la lista (angulos={angulos}) debe coincidir con el numero de juntas (num_joints={num_joints})')
+        for valor in angulos:
+            if not isinstance(valor,(int,float)):
+                raise FredArmError(f'Todos los valores en el argumento "angulos" debe ser de tipo int o float')
+        for valor in (speed, acc):
+            if not isinstance(valor, (int, float)):
+                raise FredArmError(f'mover_servos_a: speed/acc deben ser numeros, recibio {valor!r}')
+            if valor <= 0:
+                raise FredArmError(f'mover_servos_a: speed/acc deben ser positivos, recibio {valor}')
+
+        self.verificar_listo()
+
+        ret = self.set_servo_angle(angulos,speed,acc,wait=True)
+        if ret != 0:
+            raise FredArmError(f'set_servo_angle fallo con ret={ret}')
+        if not self.estado_ok():
+            raise FredArmError(f'mover_servos_a() completo los servicios pero el brazo no llego a READY/SLEEPING: {self.resumen_estado()}')
 
     def home(self):
         """Funcion que encapsula el servicio move_gohome. Primitiva de alto nivel en capa 3 que manda al robot a sus coordenadas bases impuestas por el fabricante

@@ -1053,17 +1053,19 @@ A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos list
   comportamiento) — xArm-Developer/xArm-Python-SDK ·
   https://github.com/xArm-Developer/xArm-Python-SDK
 - **Imagen del firmware simulado** — `danielwang123321/uf-ubuntu-docker` (Docker Hub) ·
-  URL
+  https://github.com/Martin-15072497651/Simulation-Offline-programming.git
+
+  https://docs.supportarticle.ufactory.cc/support_articles/software/how-to-install-ufactory-studio-in-docker.html
 
 ### 8.2 Documentación de UFACTORY
 
 - **Códigos de la API y de error del controlador** (la doc que distingue las dos tablas de
   códigos `ret` vs `err`) — docs de UFACTORY ·
-  <verificar URL: https://docs.api.ufactory.cc>
+  https://docs.api.ufactory.cc
 - **Manual de usuario del xArm** (máquina de modos/estados, códigos de error del control
   box) · <verificar URL>
 - **Guía de instalación de UFACTORY Studio en Docker** ·
-  <verificar URL: docs.ufactory.cc/support_articles/software/...>
+  docs.ufactory.cc/support_articles/software/
 
 ### 8.3 Documentación de ROS2
 

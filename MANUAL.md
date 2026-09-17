@@ -1045,15 +1045,15 @@ A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos list
 - **Repositorio del proyecto** — `carlosrgb06/fred-lang-ros2-setup`
  https://github.com/carlosrgb06/fred-lang-ros2-setup
 - **`xarm_ros2`** (submódulo anidado — driver ROS2, mensajes, moveit config de UFACTORY) —
-  xArm-Developer/xarm_ros2 · <verificar URL: https://github.com/xArm-Developer/xarm_ros2>
+  xArm-Developer/xarm_ros2 https://github.com/xArm-Developer/xarm_ros2
 - **`xArm-CPLUS-SDK`** (el SDK de C++ que compila `xarm_api`, anidado en
   `xarm_sdk/cxx`) — xArm-Developer/xArm-CPLUS-SDK ·
-  <verificar URL: https://github.com/xArm-Developer/xArm-CPLUS-SDK>
+  https://github.com/xArm-Developer/xArm-CPLUS-SDK
 - **`xArm-Python-SDK`** (referencia; no se usa en el proyecto, pero útil para contrastar
   comportamiento) — xArm-Developer/xArm-Python-SDK ·
-  <verificar URL: https://github.com/xArm-Developer/xArm-Python-SDK>
+  https://github.com/xArm-Developer/xArm-Python-SDK
 - **Imagen del firmware simulado** — `danielwang123321/uf-ubuntu-docker` (Docker Hub) ·
-  <verificar URL>
+  URL
 
 ### 8.2 Documentación de UFACTORY
 

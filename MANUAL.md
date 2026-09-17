@@ -4,7 +4,7 @@
 > Documento de referencia técnica de la capa de control del brazo robótico
 > UFACTORY xArm6 para el proyecto FrED-LANG.
 >
-> Última actualización: 2026-09-13
+> Última actualización: 2026-09-16
 
 ---
 
@@ -271,10 +271,6 @@ servicios `/xarm/*` funcionan de forma independiente a la GUI.
 
 ## 4. La librería `FredArm`
 
-<!-- ============================================================
-     SECCIÓN EN CONSTRUCCIÓN — empezamos por aquí
-     ============================================================ -->
-
 ### 4.1 Arquitectura en capas
 
 `FredArm` está organizada como una **jerarquía de abstracción**: cada capa usa la de
@@ -284,11 +280,13 @@ servicios ROS2 subyacentes.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│  Capa 3 — Primitivas de alto nivel        home()  mover_a()  agarrar()  │  (en construcción)
-│           (verbos semánticos)                                          │
+│  Capa 3 — Primitivas de alto nivel   preparar()  recuperar()  home()   │
+│           (verbos semánticos)        mover_a()  mover_servos_a()       │
+│                                      agarrar()  soltar()  (futuro)     │
 ├───────────────────────────────────────────────────────────────────────┤
-│  Capa 2 — Lectura y verificación de       esperar_listo()  hay_error() │
-│           estado                          servos_ok()  get_angulos()   │
+│  Capa 2 — Lectura y verificación de       estado_ok()  verificar_listo()│
+│           estado                          hay_error()  servos_ok()     │
+│                                           get_angulos()  resumen_estado()│
 ├───────────────────────────────────────────────────────────────────────┤
 │  Capa 1 — Cliente de servicios /xarm/*    motion_enable()  set_mode()  │
 │           (control de bajo nivel)         set_state()  set_position()  │
@@ -343,11 +341,19 @@ Todos los métodos que llaman a un servicio siguen el mismo patrón (el "molde")
 
 ```
 1. Construir el request         request = TipoServicio.Request()
-2. Llenar sus campos            request.campo = valor
+2. Llenar sus campos (casteando) request.campo = float(valor)
 3. Enviar de forma asíncrona    future = cliente.call_async(request)
 4. Esperar la respuesta         rclpy.spin_until_future_complete(self, future)
 5. Leer el resultado            return future.result().ret
 ```
+
+Un detalle del paso 2: los campos se **castean al tipo exacto que ROS2 espera** antes de
+llenarlos (`float()` en poses, ángulos y velocidades; `int()` en los campos de arranque).
+No es un adorno: si se pasa un `int` donde el mensaje declara un `float`, el generador de
+mensajes de ROS2 no lanza una excepción de Python sino que dispara un *assert* de C que
+aborta el proceso entero (`Aborted (core dumped)`). Castear en el punto donde se arma el
+mensaje —la frontera con ROS2— blinda a la librería contra ese fallo sin importar qué tipo
+numérico reciba (por ejemplo, un `200` entero generado por el LLM).
 
 En el sistema de servicios de ROS2, las llamadas y sus respuestas no llegan al instante:
 los procesos que emplean parte de las funciones de `FredArm` son **asíncronos**. Cuando
@@ -451,13 +457,28 @@ Verifica que los servos estén habilitados mediante el bitmask `mt_able`.
 - `num_joints` (int): número de articulaciones a verificar (default `6`).
 - **Retorna** (bool): `True` si las primeras `num_joints` juntas están habilitadas.
 
-**`esperar_listo(timeout=10.0)`**
-Bloquea (haciendo `spin_once`) hasta que el brazo esté en READY (`state=2`), sin error y
-con los servos habilitados. Es la verificación que se llama tras cada comando para
-confirmar que terminó bien.
+**`estado_ok(timeout=10.0)`**
+Bloquea (haciendo `spin_once` en bucle) hasta que el brazo esté en READY (`state=2`), sin
+error y con los servos habilitados. Es la verificación de **confirmación** que se llama
+*tras* cada comando de movimiento para confirmar que terminó bien.
 - `timeout` (float): tiempo máximo de espera, en segundos.
 - **Retorna** (bool): `True` si el brazo llegó a estado listo; `False` si hubo error o se
   agotó el tiempo.
+
+**`verificar_listo()`**
+Verificación de **precondición**: hace un solo `spin_once` para refrescar el estado y
+**lanza `FredArmError`** si el brazo no está listo en ese instante. A diferencia de
+`estado_ok()` (que espera en bucle), esta mira una sola vez y falla rápido. Se usa al
+inicio de cada primitiva de movimiento para no comandar un brazo que no fue arrancado.
+Distingue tres casos: sin estado (`_last_state is None`, no se corrió `preparar()`), brazo
+en error, y brazo no-READY.
+- **Retorna:** nada si el brazo está listo.
+- **Lanza** `FredArmError` si el brazo no está listo (con mensaje según el caso).
+
+**`resumen_estado()`**
+Devuelve un string legible del estado actual (`state`, `err`, `servos_ok`) para logs y
+mensajes de error. Si no hay estado aún, lo indica en vez de fallar.
+- **Retorna** (str): resumen del estado, o aviso de que no hay estado.
 
 **`get_angulos()`**
 - **Retorna** (list[float] | None): ángulos articulares actuales (en radianes), o `None`
@@ -536,7 +557,7 @@ reporta `state=2` (READY). Es el comportamiento esperado: `set_state(0)` signifi
 listo", y el estado leído que corresponde a "listo" es el `2`. Además, `set_state(0)`
 limpia el código de error de forma implícita.
 
-Por eso `esperar_listo()` compara contra `state == 2` (el valor *leído*), no contra el `0`
+Por eso `estado_ok()` compara contra `state == 2` (el valor *leído*), no contra el `0`
 que se fijó.
 
 #### Unidades
@@ -552,6 +573,117 @@ Las unidades son la fuente de error más común. La regla:
   mm y el `3.14` es π radianes (punta apuntando hacia abajo). Cuando utilizamos el modo de
   control cartesiano la velocidad y la aceleración (`speed` y `acc`) tienen unidades de
   mm/s y mm/s² respectivamente.
+
+### 4.5 Referencia de la API — Capa 3 (primitivas de alto nivel)
+
+Las primitivas son los verbos semánticos que envuelven la Capa 1 con verificación
+integrada. Son lo que el LLM generará mayormente, y están diseñadas para ser seguras por
+construcción y legibles como una receta.
+
+**El patrón común.** Todas las primitivas siguen la misma secuencia interna:
+
+```
+1. Validar los argumentos recibidos      (tipos, cantidad, positividad)
+2. verificar_listo()                      (precondición: el brazo debe estar READY)
+3. Ejecutar el servicio de Capa 1
+4. Comprobar el ret del servicio
+5. Confirmar el estado final con estado_ok()
+```
+
+Si cualquier paso falla, la primitiva **lanza `FredArmError`** (ver
+[manejo de errores](#manejo-de-errores)). Ninguna primitiva devuelve un valor de éxito: si
+no lanzó, salió bien — la ausencia de excepción es la señal de éxito. Este contrato es
+deliberado y se explica abajo.
+
+#### Arranque y recuperación
+
+**`preparar(enable=1, id=8, mode=0, state=0)`**
+Ejecuta la secuencia de arranque completa en una sola llamada
+(`motion_enable → set_mode → set_state`) y confirma con `estado_ok()` que el brazo quedó en
+READY. Es la primera primitiva que debe correr en cualquier sesión.
+- Valida que `enable` sea `0` o `1`.
+- Acepta `ret=3` en `motion_enable` como éxito (timeout cosmético del simulador; ver
+  [5.1](#51-el-ret3-de-motion_enable)).
+- **Retorna:** nada si el arranque tuvo éxito.
+- **Lanza** `FredArmError` si algún servicio devuelve un `ret` inválido o si el brazo no
+  llega a READY.
+
+**`recuperar()`**
+Saca al brazo de un estado de error: llama `clean_error()` y luego re-ejecuta el arranque
+completo (vía `preparar()`). Se usa tras un `FredArmError` de movimiento para dejar el brazo
+listo de nuevo.
+- Detecta dos niveles de fallo: comunicación (el `ret` de `clean_error`) y efecto (el brazo
+  no vuelve a READY, detectado por el `estado_ok()` dentro de `preparar()`).
+- **Retorna:** nada si la recuperación tuvo éxito.
+- **Lanza** `FredArmError` si `clean_error` falla o si el brazo no se recupera (error no
+  limpiable por software).
+
+#### Movimiento
+
+**`mover_a(x, y, z, roll=π, pitch=0.0, yaw=0.0, speed=200.0, acc=2000.0)`**
+Movimiento en **espacio cartesiano** — el caballo de batalla. Envuelve `set_position` con
+coordenadas nombradas en vez de una lista, lo que hace más difícil que el LLM invierta el
+orden o pierda un elemento.
+- `x, y, z` (int | float): posición del TCP en **milímetros**.
+- `roll, pitch, yaw` (int | float): orientación en **radianes**. Los defaults
+  (`π, 0, 0`) dejan el efector **apuntando hacia abajo**, la orientación típica de
+  pick-and-place; así `mover_a(x, y, z)` "va a ese punto mirando hacia abajo".
+- `speed` (int | float, positivo): velocidad lineal del TCP, en mm/s.
+- `acc` (int | float, positivo): aceleración lineal del TCP, en mm/s².
+- **Retorna:** nada si el movimiento tuvo éxito.
+- **Lanza** `FredArmError` si algún argumento tiene tipo inválido, si `speed`/`acc` no son
+  positivos, si el brazo no está listo, si `set_position` falla (p. ej. pose inalcanzable),
+  o si el brazo no vuelve a READY tras moverse.
+
+**`mover_servos_a(angulos, num_joints=6, speed=0.35, acc=10.0)`**
+Movimiento en **espacio articular**. Envuelve `set_servo_angle`.
+- `angulos` (list): ángulo objetivo por junta, **en radianes**. Debe tener exactamente
+  `num_joints` elementos, todos numéricos.
+- `num_joints` (int): número de juntas esperado (default `6` para xArm6). Sirve para validar
+  el tamaño de `angulos` contra el modelo.
+- `speed` (int | float, positivo): velocidad articular, en rad/s.
+- `acc` (int | float, positivo): aceleración articular, en rad/s².
+- **Retorna:** nada si el movimiento tuvo éxito.
+- **Lanza** `FredArmError` si `angulos` no es una lista, si su longitud no coincide con
+  `num_joints`, si algún elemento no es numérico, si `speed`/`acc` no son positivos, si el
+  brazo no está listo, si el servicio falla, o si no vuelve a READY.
+
+**`home()`**
+Lleva el brazo a su pose home de fábrica. Envuelve `move_gohome` con verificación.
+- **Retorna:** nada si el movimiento tuvo éxito.
+- **Lanza** `FredArmError` si el brazo no está listo, si `move_gohome` falla, o si no vuelve
+  a READY.
+
+#### Manejo de errores
+
+Toda condición anómala se comunica lanzando **`FredArmError`**, una clase de excepción
+propia definida en `fred_arm_error.py`. El diseño elegido es **fallar ruidoso y
+detenerse**: cuando algo sale mal, la ejecución se detiene de inmediato y el error se
+reporta con un mensaje descriptivo. Nada de reintentos silenciosos ni de devolver `False`
+que el código generado podría ignorar por descuido.
+
+La razón es doble. Primero, **seguridad**: detener la secuencia ante el primer fallo evita
+que el robot siga ejecutando comandos sobre un estado inválido. Segundo,
+**interpretabilidad**: el mensaje de cada excepción está pensado como *feedback accionable*
+para que el LLM corrija su código en el siguiente intento.
+
+La responsabilidad se reparte por capas:
+
+- **Capa 1** devuelve el `ret` crudo del driver (`0` = éxito), fiel a la convención del SDK.
+  No interpreta ni lanza.
+- **Capa 3** traduce ese `ret`, el estado observado y la validación de argumentos a
+  `FredArmError` cuando corresponde.
+- El **orquestador** (futuro) envolverá la ejecución del código generado por el LLM en un
+  `try / except FredArmError`, capturará el mensaje y se lo devolverá al LLM como feedback.
+  La primitiva *lanza*; el orquestador *atrapa y traduce*. La primitiva no sabe nada del LLM.
+
+**Frontera de validación.** La Capa 3 es la membrana entre el código no confiable que
+genera el LLM y la Capa 1. Cada primitiva valida sus argumentos (tipos, cantidad,
+positividad) antes de tocar el brazo. La validación es permisiva con la forma del número
+(acepta `int` y `float`); el casteo al tipo exacto de ROS2 ocurre después, en la Capa 1.
+La *alcanzabilidad física* de una pose no se valida en Python: el firmware es el validador
+autoritativo de cinemática, y su rechazo se captura vía el `ret` del servicio (ver
+[5.4](#54-recuperación-de-errores-de-movimiento)).
 
 ---
 
@@ -582,7 +714,7 @@ cambian). El `ret=3` es un falso negativo del ACK, no un fallo de la operación.
 **Cómo lo maneja `FredArm`.** La librería no aborta ante el `ret=3`. En vez de jalar el
 cable a todo el proceso, se verifica el resultado leyendo `/xarm/robot_states`:
 `servos_ok()` nos confirma que los servos están habilitados a través del bitmask `mt_able`,
-y `esperar_listo()` confirma que el brazo llegó al estado READY/STANDBY sin ningún error. Es
+y `estado_ok()` confirma que el brazo llegó al estado READY/STANDBY sin ningún error. Es
 decir, contrastamos el estado observado del robot a través de los tópicos de ROS2, no contra
 el código de retorno del servicio `motion_enable`.
 
@@ -647,6 +779,46 @@ selectivos (`--packages-select fred_lang_driver`) ya funcionan bien para iterar 
 host y se monta dentro del contenedor; los directorios `build/`, `install/` y `log/` que
 genera `colcon` no se versionan (se excluyen mediante `.gitignore`). Esto mantiene el repo
 limpio y evita subir megas de archivos regenerables.
+
+### 5.4 Recuperación de errores de movimiento
+
+Un movimiento inválido (por ejemplo, una pose fuera del alcance del brazo) no rompe el
+sistema, pero deja el brazo en un estado del que hay que saber salir. Esto se caracterizó
+experimentalmente contra el simulador, provocando poses imposibles a propósito.
+
+**Cómo se manifiesta un fallo de movimiento.** Depende del estado previo del brazo:
+
+- **Brazo limpio → pose imposible:** el servicio devuelve un `ret` negativo (p. ej. `-9`),
+  el campo `err` queda en `0`, y el brazo queda en `state=1` (RUNNING "fantasma", como si
+  ejecutara un movimiento que en realidad fue rechazado). Se recupera con `set_state(0)` +
+  confirmación con `estado_ok()`.
+- **Brazo ya en error → pose imposible:** el servicio devuelve `ret=1` y el brazo entra en
+  `state=4` (STOPPED) con `err=21`.
+
+En ambos casos el fallo se detecta por el **`ret` del servicio** (paso 4 del patrón de las
+primitivas), no por `estado_ok()`. Esto justifica que las primitivas tengan dos chequeos
+separados: si solo miraran `estado_ok()`, un comando rechazado que deja el brazo en `state=1`
+haría que la verificación esperara en vano un movimiento que nunca va a terminar.
+
+**Qué es `err=21`.** Es un error de la familia planificación/cinemática (ruta no
+planificable, singularidad, fuera de alcance), recuperable por software. No confundir con el
+código `21` de la *otra* tabla de UFACTORY: los **códigos de retorno de la API** (los `ret`)
+y los **códigos de error del controlador** (el campo `err`) son dos tablas distintas que
+comparten números pequeños. En la tabla de `ret`, `21` significa "modbus baudrate not
+supported" — nada que ver. El `err=21` que ve `FredArm` es el de planificación.
+
+**La secuencia de recuperación.** Lo que funciona es `clean_error()` seguido del arranque
+completo (`motion_enable → set_mode → set_state → estado_ok`), que es exactamente lo que hace
+la primitiva `recuperar()`. Un hallazgo importante: en este firmware **`clean_error()` por sí
+solo no baja el `err=21`** — devuelve `ret=0` (comando aceptado) pero el error persiste,
+incluso dejando pasar tiempo. Hace falta el re-arranque completo. Esto refuerza un principio
+transversal del proyecto: **`ret=0` significa "el comando fue aceptado", no "el comando logró
+su efecto"**; la confirmación real siempre viene de leer el estado con `estado_ok()`, nunca
+del `ret`.
+
+> **Nota de laboratorio.** El estado del brazo persiste entre ejecuciones del script (el
+> firmware guarda su estado). Un script que deja el brazo sucio contamina la siguiente
+> corrida. Para experimentos limpios, reiniciar el contenedor del simulador.
 
 ---
 

@@ -352,7 +352,7 @@ llenarlos (`float()` en poses, ángulos y velocidades; `int()` en los campos de 
 No es un adorno: si se pasa un `int` donde el mensaje declara un `float`, el generador de
 mensajes de ROS2 no lanza una excepción de Python sino que dispara un *assert* de C que
 aborta el proceso entero (`Aborted (core dumped)`). Castear en el punto donde se arma el
-mensaje —la frontera con ROS2— blinda a la librería contra ese fallo sin importar qué tipo
+mensaje, blinda a la librería contra ese fallo sin importar qué tipo
 numérico reciba (por ejemplo, un `200` entero generado por el LLM).
 
 En el sistema de servicios de ROS2, las llamadas y sus respuestas no llegan al instante:
@@ -592,8 +592,7 @@ construcción y legibles como una receta.
 
 Si cualquier paso falla, la primitiva **lanza `FredArmError`** (ver
 [manejo de errores](#manejo-de-errores)). Ninguna primitiva devuelve un valor de éxito: si
-no lanzó, salió bien — la ausencia de excepción es la señal de éxito. Este contrato es
-deliberado y se explica abajo.
+no lanzó, salió bien, la ausencia de excepción es la señal de éxito.
 
 #### Arranque y recuperación
 

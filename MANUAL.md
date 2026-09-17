@@ -620,7 +620,7 @@ listo de nuevo.
 #### Movimiento
 
 **`mover_a(x, y, z, roll=π, pitch=0.0, yaw=0.0, speed=200.0, acc=2000.0)`**
-Movimiento en **espacio cartesiano** — el caballo de batalla. Envuelve `set_position` con
+Movimiento en **espacio cartesiano**. Envuelve `set_position` con
 coordenadas nombradas en vez de una lista, lo que hace más difícil que el LLM invierta el
 orden o pierda un elemento.
 - `x, y, z` (int | float): posición del TCP en **milímetros**.
@@ -676,7 +676,7 @@ La responsabilidad se reparte por capas:
   `try / except FredArmError`, capturará el mensaje y se lo devolverá al LLM como feedback.
   La primitiva *lanza*; el orquestador *atrapa y traduce*. La primitiva no sabe nada del LLM.
 
-**Frontera de validación.** La Capa 3 es la membrana entre el código no confiable que
+**Frontera de validación.** La Capa 3 es la barrera entre el código no confiable que
 genera el LLM y la Capa 1. Cada primitiva valida sus argumentos (tipos, cantidad,
 positividad) antes de tocar el brazo. La validación es permisiva con la forma del número
 (acepta `int` y `float`); el casteo al tipo exacto de ROS2 ocurre después, en la Capa 1.
@@ -804,7 +804,7 @@ planificable, singularidad, fuera de alcance), recuperable por software. No conf
 código `21` de la *otra* tabla de UFACTORY: los **códigos de retorno de la API** (los `ret`)
 y los **códigos de error del controlador** (el campo `err`) son dos tablas distintas que
 comparten números pequeños. En la tabla de `ret`, `21` significa "modbus baudrate not
-supported" — nada que ver. El `err=21` que ve `FredArm` es el de planificación.
+supported". El `err=21` que ve `FredArm` es el de planificación.
 
 **La secuencia de recuperación.** Lo que funciona es `clean_error()` seguido del arranque
 completo (`motion_enable → set_mode → set_state → estado_ok`), que es exactamente lo que hace

@@ -1043,7 +1043,7 @@ A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos list
 ### 8.1 Repositorios
 
 - **Repositorio del proyecto** — `carlosrgb06/fred-lang-ros2-setup`
-  <verificar URL: https://github.com/carlosrgb06/fred-lang-ros2-setup>
+ https://github.com/carlosrgb06/fred-lang-ros2-setup
 - **`xarm_ros2`** (submódulo anidado — driver ROS2, mensajes, moveit config de UFACTORY) —
   xArm-Developer/xarm_ros2 · <verificar URL: https://github.com/xArm-Developer/xarm_ros2>
 - **`xArm-CPLUS-SDK`** (el SDK de C++ que compila `xarm_api`, anidado en

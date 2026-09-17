@@ -1036,34 +1036,31 @@ A largo plazo, cuando todos los puntos anteriores sean atendidos, estaremos list
 
 ## 8. Referencias
 
-<!-- NOTA: confirma las URLs marcadas <verificar URL> antes de publicar.
-     Puse las que se pueden dar con confianza; el resto requiere que
-     pegues el enlace exacto del repo/página que usaste. -->
-
 ### 8.1 Repositorios
 
-- **Repositorio del proyecto** — `carlosrgb06/fred-lang-ros2-setup`
- https://github.com/carlosrgb06/fred-lang-ros2-setup
+- **Repositorio del proyecto** — `carlosrgb06/fred-lang-ros2-setup` ·
+  https://github.com/carlosrgb06/fred-lang-ros2-setup
 - **`xarm_ros2`** (submódulo anidado — driver ROS2, mensajes, moveit config de UFACTORY) —
-  xArm-Developer/xarm_ros2 https://github.com/xArm-Developer/xarm_ros2
+  xArm-Developer/xarm_ros2 ·
+  https://github.com/xArm-Developer/xarm_ros2
 - **`xArm-CPLUS-SDK`** (el SDK de C++ que compila `xarm_api`, anidado en
   `xarm_sdk/cxx`) — xArm-Developer/xArm-CPLUS-SDK ·
   https://github.com/xArm-Developer/xArm-CPLUS-SDK
 - **`xArm-Python-SDK`** (referencia; no se usa en el proyecto, pero útil para contrastar
   comportamiento) — xArm-Developer/xArm-Python-SDK ·
   https://github.com/xArm-Developer/xArm-Python-SDK
-- **Imagen del firmware simulado** — `danielwang123321/uf-ubuntu-docker` (Docker Hub) ·
+- **Simulador de firmware / offline programming** (referencia usada para levantar el
+  entorno simulado) ·
   https://github.com/Martin-15072497651/Simulation-Offline-programming.git
 
-  https://docs.supportarticle.ufactory.cc/support_articles/software/how-to-install-ufactory-studio-in-docker.html
+### 8.2 Fuentes sobre códigos, modos y estados del xArm
 
-### 8.2 Documentación de UFACTORY
-
-- **Códigos de la API y de error del controlador** (la doc que distingue las dos tablas de
-  códigos `ret` vs `err`) — docs de UFACTORY ·
+- **`xArm-CPLUS-SDK`** — código fuente del SDK de C++ que compila `xarm_api`; referencia
+  para el manejo de códigos de retorno (`ret`) y el comportamiento de los servicios ·
   https://github.com/xArm-Developer/xArm-CPLUS-SDK.git
-- **Manual de usuario del xArm** (máquina de modos/estados, códigos de error del control
-  box) · https://github.com/xArm-Developer/xarm_ros2.git
+- **`xarm_ros2`** — repositorio del driver ROS2; sus definiciones de mensajes y servicios
+  (`RobotMsg`, `MoveCartesian`, `MoveJoint`) documentan la máquina de modos/estados y los
+  campos leídos en `/xarm/robot_states` · https://github.com/xArm-Developer/xarm_ros2.git
 - **Guía de instalación de UFACTORY Studio en Docker** · https://docs.supportarticle.ufactory.cc/support_articles/software/how-to-install-ufactory-studio-in-docker.html
 
 ### 8.3 Documentación de ROS2

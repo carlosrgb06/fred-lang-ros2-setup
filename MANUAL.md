@@ -821,9 +821,220 @@ del `ret`.
 
 ---
 
+<!-- ============================================================
+     ANDAMIAJE SECCIÓN 6 — Guía de uso
+     Instrucciones: rellena los bloques [TU PROSA: ...] con tu texto.
+     El código ya está listo (copiar y correr). Cuando termines,
+     pásamelo y lo integro al MANUAL con tu voz.
+     ============================================================ -->
+
 ## 6. Guía de uso — ejemplos
 
-<!-- PENDIENTE -->
+[TU PROSA: 1–2 párrafos de introducción a la sección. Qué encontrará el lector aquí
+(ejemplos de menos a más complejos), y el recordatorio de que todos asumen los tres
+contextos corriendo — firmware sim, driver xarm_api y el nodo — como se explicó en la
+sección 3.4. Menciona que todos los ejemplos son ejecutables completos.]
+
+### 6.1 El flujo mínimo
+
+[TU PROSA: explica qué hace este ejemplo — el "hola mundo" de la librería. Señala las tres
+piezas del andamiaje que se repetirán en todos los ejemplos: (1) `rclpy.init()` /
+`shutdown()` que abren y cierran el contexto de ROS2, (2) crear el nodo `FredArm()`, y (3)
+el bloque `try / except FredArmError` que captura cualquier fallo de una primitiva. Explica
+por qué `preparar()` va siempre primero: deja el brazo en READY antes de cualquier
+movimiento. Cierra notando que si algo falla, el `except` imprime el mensaje descriptivo del
+error — la base de la interpretabilidad.]
+
+```python
+import rclpy
+from fred_lang_driver.fred_arm import FredArm
+from fred_lang_driver.fred_arm_error import FredArmError
+
+def main():
+    rclpy.init()
+    arm = FredArm()
+    try:
+        arm.preparar()                       # arranque completo -> brazo en READY
+        arm.mover_a(x=206, y=0, z=150.5)     # movimiento cartesiano (efector hacia abajo)
+        arm.home()                           # regreso al home de fábrica
+    except FredArmError as e:
+        arm.get_logger().error(f'La operación falló: {e}')
+    finally:
+        arm.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 6.2 Movimiento cartesiano vs. articular
+
+[TU PROSA: recuerda brevemente la diferencia (remite a la sección 4.4): `mover_a` piensa en
+coordenadas del efector (el flujo natural, el que se alinea con el VLA); `mover_servos_a`
+piensa en ángulos de junta (para poses fijas conocidas). Señala que en `mover_a` la
+orientación por defecto deja el efector hacia abajo, así que basta con dar x, y, z. En
+`mover_servos_a`, que los ángulos van en radianes y deben ser tantos como juntas
+(`num_joints=6` para el xArm6). Los ángulos del ejemplo son pequeños y cercanos a home, una
+pose segura para ilustrar.]
+
+```python
+import rclpy
+from fred_lang_driver.fred_arm import FredArm
+from fred_lang_driver.fred_arm_error import FredArmError
+
+def main():
+    rclpy.init()
+    arm = FredArm()
+    try:
+        arm.preparar()
+
+        # --- Cartesiano: se piensa en coordenadas del efector (mm) ---
+        arm.mover_a(x=206, y=0, z=150.5)
+
+        # --- Articular: se piensa en ángulos de cada junta (radianes) ---
+        arm.mover_servos_a([0.0, -0.2, 0.0, 0.2, 0.0, 0.0])
+
+        arm.home()
+    except FredArmError as e:
+        arm.get_logger().error(f'La operación falló: {e}')
+    finally:
+        arm.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 6.3 Manejo de errores y recuperación
+
+[TU PROSA: explica el patrón de producción. Cuando una primitiva detecta un fallo, lanza
+`FredArmError` y la ejecución salta al `except` — el brazo puede quedar en un estado sucio
+(ver sección 5.4). `recuperar()` limpia el error y re-arranca el brazo, dejándolo listo para
+reintentar. Señala que este es exactamente el patrón que usará el orquestador con el código
+del LLM: intentar → si falla, capturar el mensaje, recuperar, y (en el futuro) devolver el
+error al LLM para que corrija. Menciona que si `recuperar()` a su vez lanza, el error no era
+recuperable por software y hay que escalar.]
+
+```python
+import rclpy
+from fred_lang_driver.fred_arm import FredArm
+from fred_lang_driver.fred_arm_error import FredArmError
+
+def main():
+    rclpy.init()
+    arm = FredArm()
+    try:
+        arm.preparar()
+        # Pose deliberadamente inalcanzable para forzar el fallo:
+        arm.mover_a(x=300, y=0, z=99999)
+    except FredArmError as e:
+        arm.get_logger().error(f'Movimiento falló: {e}')
+        # El brazo quedó en un estado sucio; recuperar lo deja listo de nuevo.
+        try:
+            arm.recuperar()
+            arm.get_logger().info('Brazo recuperado, listo para reintentar.')
+        except FredArmError as e2:
+            arm.get_logger().error(f'Recuperación falló (error no recuperable): {e2}')
+    finally:
+        arm.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 6.4 Uso avanzado: bajar a la Capa 1
+
+[TU PROSA: explica que las primitivas cubren el uso normal, pero la Capa 1 sigue expuesta
+para depuración, movimientos especiales o control fino. La advertencia clave: al llamar los
+servicios directos NO se obtiene la verificación automática (validación de argumentos,
+`verificar_listo`, confirmación con `estado_ok`) — el usuario es responsable de comprobar el
+`ret` y el estado por su cuenta. Menciona que aquí se ve el `ret` crudo del driver (0 =
+éxito), y que hay que hacer el arranque a mano (`motion_enable → set_mode → set_state`).
+Recomienda quedarse en Capa 3 salvo que haya una razón concreta para bajar.]
+
+```python
+import rclpy
+from fred_lang_driver.fred_arm import FredArm
+
+def main():
+    rclpy.init()
+    arm = FredArm()
+
+    # Arranque manual (sin la primitiva preparar):
+    arm.motion_enable(1, 8)
+    arm.set_mode(0)
+    arm.set_state(0)
+
+    # Verificación a mano: aquí NO hay red de seguridad automática.
+    if not arm.estado_ok():
+        arm.get_logger().error('El brazo no llegó a READY.')
+        arm.destroy_node()
+        rclpy.shutdown()
+        return
+
+    # Servicio directo: devuelve el ret crudo del driver (0 = éxito).
+    ret = arm.set_position([206.0, 0.0, 150.5, 3.1416, 0.0, 0.0])
+    arm.get_logger().info(f'set_position -> ret={ret}')
+    arm.estado_ok()   # confirmar a mano que terminó bien
+
+    arm.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 6.5 Una tarea completa: pick-and-place
+
+[TU PROSA: este es el ejemplo que muestra cómo se encadenan las primitivas para una tarea
+real, y anticipa cómo se verá el código que genere el LLM: una secuencia de verbos
+semánticos que se lee como una receta. Describe el flujo: preparar, ir sobre el objeto,
+bajar, agarrar, subir, ir al destino, soltar, volver a home. Aclara que `agarrar()` y
+`soltar()` están comentados porque dependen de la pinza, que está pendiente de hardware (ver
+sección 4.5 / trabajo futuro) — la estructura ya contempla su lugar. Cierra notando cómo
+este script legible es exactamente lo que sostiene el principio de interpretabilidad: se
+puede auditar qué hará el robot sin leer una sola llamada de bajo nivel. Las coordenadas son
+ilustrativas; ajústalas al workspace real.]
+
+```python
+import rclpy
+from fred_lang_driver.fred_arm import FredArm
+from fred_lang_driver.fred_arm_error import FredArmError
+
+def main():
+    rclpy.init()
+    arm = FredArm()
+    try:
+        arm.preparar()
+
+        # 1. Ir sobre el objeto y bajar
+        arm.mover_a(x=206, y=0, z=200)       # posición de aproximación
+        arm.mover_a(x=206, y=0, z=150.5)     # bajar al objeto
+
+        # 2. Agarrar (pendiente de hardware — la pinza no está en el sim)
+        # arm.agarrar()
+
+        # 3. Subir y llevar al destino
+        arm.mover_a(x=206, y=0, z=200)       # subir con el objeto
+        arm.mover_a(x=100, y=150, z=200)     # mover al destino
+        arm.mover_a(x=100, y=150, z=150.5)   # bajar en el destino
+
+        # 4. Soltar (pendiente de hardware)
+        # arm.soltar()
+
+        # 5. Volver a home
+        arm.mover_a(x=100, y=150, z=200)     # subir
+        arm.home()
+    except FredArmError as e:
+        arm.get_logger().error(f'La tarea falló: {e}')
+    finally:
+        arm.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
 
 ---
 
